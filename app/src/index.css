@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-forest-dark text-cream font-body;
+  }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { @apply bg-forest-dark; }
+  ::-webkit-scrollbar-thumb { @apply bg-forest-light rounded-full; }
+}
+
+@layer components {
+  .card {
+    @apply bg-forest rounded-xl border border-forest-light/40 p-6;
+  }
+  .btn-primary {
+    @apply bg-gold text-forest-dark font-body font-semibold px-4 py-2 rounded-lg
+           hover:bg-gold-light transition-colors text-sm;
+  }
+  .btn-ghost {
+    @apply text-muted hover:text-cream hover:bg-forest-light/50 px-3 py-2 rounded-lg
+           transition-colors text-sm font-body;
+  }
+  .table-row {
+    @apply border-b border-forest-light/30 hover:bg-forest-light/20 transition-colors;
+  }
+  .badge {
+    @apply text-xs font-mono px-2 py-0.5 rounded-full;
+  }
+}

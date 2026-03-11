@@ -4,15 +4,16 @@ import PageHeader from '../components/PageHeader'
 import { Search, Filter, X, Upload, ImageOff } from 'lucide-react'
 
 export default function SKUs() {
-  const [rows, setRows]           = useState([])
-  const [types, setTypes]         = useState([])
-  const [loading, setLoading]     = useState(true)
-  const [search, setSearch]       = useState('')
+  const [rows, setRows]             = useState([])
+  const [types, setTypes]           = useState([])
+  const [loading, setLoading]       = useState(true)
+  const [search, setSearch]         = useState('')
   const [typeFilter, setTypeFilter] = useState('all')
-  const [selected, setSelected]   = useState(null)
+  const [selected, setSelected]     = useState(null)
   const [components, setComponents] = useState([])
+  const [costs, setCosts]           = useState({}) // article -> cost_per_unit
   const [loadingDetail, setLoadingDetail] = useState(false)
-  const [uploading, setUploading] = useState(false)
+  const [uploading, setUploading]   = useState(false)
   const fileRef = useRef(null)
 
   useEffect(() => {
@@ -45,15 +46,41 @@ export default function SKUs() {
 
   async function openSKU(row) {
     if (selected?.sku_article === row.sku_article) {
-      setSelected(null); setComponents([]); return
+      setSelected(null); setComponents([]); setCosts({}); return
     }
     setSelected(row)
     setLoadingDetail(true)
-    const { data } = await supabase
+
+    // Состав SKU
+    const { data: comps } = await supabase
       .from('sku_recipe_components')
-      .select('quantity, unit, recipes(article, name), raw_materials(article, name)')
+      .select('quantity, unit, recipes(article, name), raw_materials(id, article, name)')
       .eq('product_id', row.product_id)
-    setComponents(data ?? [])
+
+    const items = comps ?? []
+    setComponents(items)
+
+    // Цены: рецепты из recipe_cost, материалы из material_prices
+    const recipeArticles  = items.filter(c => c.recipes).map(c => c.recipes.article)
+    const materialIds     = items.filter(c => c.raw_materials).map(c => c.raw_materials.id)
+
+    const [recipeCosts, matPrices] = await Promise.all([
+      recipeArticles.length
+        ? supabase.from('recipe_cost').select('recipe_article, total_cost').in('recipe_article', recipeArticles)
+        : { data: [] },
+      materialIds.length
+        ? supabase.from('material_prices')
+            .select('material_id, price_per_unit')
+            .in('material_id', materialIds)
+            .is('valid_to', null)
+        : { data: [] },
+    ])
+
+    const costMap = {}
+    for (const r of (recipeCosts.data ?? [])) costMap[r.recipe_article] = Number(r.total_cost)
+    for (const m of (matPrices.data ?? []))   costMap[m.material_id]    = Number(m.price_per_unit)
+    setCosts(costMap)
+
     setLoadingDetail(false)
   }
 
@@ -61,33 +88,16 @@ export default function SKUs() {
     const file = e.target.files?.[0]
     if (!file || !selected) return
     setUploading(true)
-
     const ext  = file.name.split('.').pop()
     const path = `${selected.sku_article}.${ext}`
-
-    // Удаляем старое фото если есть
     await supabase.storage.from('sku-photos').remove([path])
-
-    const { error: upErr } = await supabase.storage
-      .from('sku-photos')
-      .upload(path, file, { upsert: true })
-
+    const { error: upErr } = await supabase.storage.from('sku-photos').upload(path, file, { upsert: true })
     if (!upErr) {
-      const { data: { publicUrl } } = supabase.storage
-        .from('sku-photos')
-        .getPublicUrl(path)
-
-      await supabase
-        .from('products')
-        .update({ photo_url: publicUrl })
-        .eq('id', selected.product_id)
-
-      // Обновляем локальное состояние
+      const { data: { publicUrl } } = supabase.storage.from('sku-photos').getPublicUrl(path)
+      await supabase.from('products').update({ photo_url: publicUrl }).eq('id', selected.product_id)
       const updated = { ...selected, photo_url: publicUrl }
       setSelected(updated)
-      setRows(prev => prev.map(r =>
-        r.product_id === selected.product_id ? { ...r, photo_url: publicUrl } : r
-      ))
+      setRows(prev => prev.map(r => r.product_id === selected.product_id ? { ...r, photo_url: publicUrl } : r))
     }
     setUploading(false)
     e.target.value = ''
@@ -100,9 +110,7 @@ export default function SKUs() {
     await supabase.from('products').update({ photo_url: null }).eq('id', selected.product_id)
     const updated = { ...selected, photo_url: null }
     setSelected(updated)
-    setRows(prev => prev.map(r =>
-      r.product_id === selected.product_id ? { ...r, photo_url: null } : r
-    ))
+    setRows(prev => prev.map(r => r.product_id === selected.product_id ? { ...r, photo_url: null } : r))
   }
 
   const leafTypes = types.filter(t =>
@@ -119,6 +127,16 @@ export default function SKUs() {
 
   const blendItems = components.filter(c => c.recipes)
   const packItems  = components.filter(c => c.raw_materials)
+
+  function lineItemCost(c) {
+    if (c.recipes) {
+      const pricePerKg = costs[c.recipes.article]
+      return pricePerKg != null ? (pricePerKg * Number(c.quantity)).toFixed(2) : null
+    } else {
+      const pricePerUnit = costs[c.raw_materials.id]
+      return pricePerUnit != null ? (pricePerUnit * Number(c.quantity)).toFixed(2) : null
+    }
+  }
 
   return (
     <div className="p-8">
@@ -179,7 +197,6 @@ export default function SKUs() {
                   className={`table-row cursor-pointer ${selected?.sku_article === r.sku_article ? 'bg-gold/10' : ''}`}
                   onClick={() => openSKU(r)}
                 >
-                  {/* Миниатюра */}
                   <td className="pl-4 py-2">
                     {r.photo_url
                       ? <img src={r.photo_url} alt="" className="w-8 h-8 rounded object-cover border border-forest-light/40" />
@@ -205,7 +222,7 @@ export default function SKUs() {
 
         {/* Detail panel */}
         {selected && (
-          <div className="w-80 flex-shrink-0 card">
+          <div className="w-80 flex-shrink-0 card overflow-y-auto max-h-[calc(100vh-10rem)]">
             <div className="flex items-start justify-between mb-4">
               <div>
                 <h3 className="font-display text-base font-semibold text-cream">Состав SKU</h3>
@@ -213,7 +230,7 @@ export default function SKUs() {
                   {selected.sku_article}
                 </span>
               </div>
-              <button onClick={() => { setSelected(null); setComponents([]) }} className="text-muted hover:text-cream transition-colors">
+              <button onClick={() => { setSelected(null); setComponents([]); setCosts({}) }} className="text-muted hover:text-cream transition-colors">
                 <X size={16} />
               </button>
             </div>
@@ -228,16 +245,10 @@ export default function SKUs() {
                     className="w-full h-44 object-cover rounded-lg border border-forest-light/40"
                   />
                   <div className="absolute inset-0 bg-forest-dark/60 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center gap-3">
-                    <button
-                      onClick={() => fileRef.current?.click()}
-                      className="btn-primary text-xs flex items-center gap-1.5"
-                    >
+                    <button onClick={() => fileRef.current?.click()} className="btn-primary text-xs flex items-center gap-1.5">
                       <Upload size={12} /> Заменить
                     </button>
-                    <button
-                      onClick={removePhoto}
-                      className="bg-red-900/80 text-red-200 text-xs px-3 py-1.5 rounded-lg hover:bg-red-800 transition-colors flex items-center gap-1.5"
-                    >
+                    <button onClick={removePhoto} className="bg-red-900/80 text-red-200 text-xs px-3 py-1.5 rounded-lg hover:bg-red-800 transition-colors flex items-center gap-1.5">
                       <X size={12} /> Удалить
                     </button>
                   </div>
@@ -252,58 +263,76 @@ export default function SKUs() {
                 >
                   {uploading
                     ? <span className="text-xs font-mono animate-pulse">Загрузка...</span>
-                    : <>
-                        <Upload size={18} />
-                        <span className="text-xs font-body">Добавить фото</span>
-                      </>
+                    : <><Upload size={18} /><span className="text-xs font-body">Добавить фото</span></>
                   }
                 </button>
               )}
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={uploadPhoto}
-              />
+              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={uploadPhoto} />
             </div>
 
             {loadingDetail ? (
               <div className="text-muted text-sm font-mono animate-pulse">Загрузка...</div>
             ) : (
               <>
+                {/* Купаж */}
                 {blendItems.length > 0 && (
                   <div className="mb-4">
-                    <div className="text-muted text-xs uppercase tracking-widest font-body mb-2">Купаж</div>
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-muted text-xs uppercase tracking-widest font-body">Купаж</span>
+                      <span className="text-muted text-xs font-mono">{Number(selected.blend_cost).toFixed(2)} руб</span>
+                    </div>
                     <div className="space-y-1">
-                      {blendItems.map((c, i) => (
-                        <div key={i} className="flex justify-between items-center py-1.5 border-b border-forest-light/30">
-                          <div>
-                            <div className="text-cream text-xs font-body">{c.recipes.name}</div>
-                            <div className="text-muted text-xs font-mono">{c.recipes.article}</div>
+                      {blendItems.map((c, i) => {
+                        const cost = lineItemCost(c)
+                        return (
+                          <div key={i} className="py-1.5 border-b border-forest-light/30">
+                            <div className="flex justify-between items-start">
+                              <div className="flex-1 min-w-0 pr-2">
+                                <div className="text-cream text-xs font-body truncate">{c.recipes.name}</div>
+                                <div className="text-muted text-xs font-mono">{c.recipes.article}</div>
+                              </div>
+                              <div className="text-right whitespace-nowrap">
+                                <div className="text-muted font-mono text-xs">{c.quantity} {c.unit}</div>
+                                {cost && <div className="text-gold font-mono text-xs">{cost} руб</div>}
+                              </div>
+                            </div>
                           </div>
-                          <div className="text-gold font-mono text-xs ml-4 whitespace-nowrap">{c.quantity} {c.unit}</div>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   </div>
                 )}
+
+                {/* Упаковка */}
                 {packItems.length > 0 && (
                   <div>
-                    <div className="text-muted text-xs uppercase tracking-widest font-body mb-2">Упаковка</div>
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-muted text-xs uppercase tracking-widest font-body">Упаковка</span>
+                      <span className="text-muted text-xs font-mono">{Number(selected.packaging_cost).toFixed(2)} руб</span>
+                    </div>
                     <div className="space-y-1">
-                      {packItems.map((c, i) => (
-                        <div key={i} className="flex justify-between items-center py-1.5 border-b border-forest-light/30">
-                          <div>
-                            <div className="text-cream text-xs font-body">{c.raw_materials.name}</div>
-                            <div className="text-muted text-xs font-mono">{c.raw_materials.article}</div>
+                      {packItems.map((c, i) => {
+                        const cost = lineItemCost(c)
+                        return (
+                          <div key={i} className="py-1.5 border-b border-forest-light/30">
+                            <div className="flex justify-between items-start">
+                              <div className="flex-1 min-w-0 pr-2">
+                                <div className="text-cream text-xs font-body">{c.raw_materials.name}</div>
+                                <div className="text-muted text-xs font-mono">{c.raw_materials.article}</div>
+                              </div>
+                              <div className="text-right whitespace-nowrap">
+                                <div className="text-muted font-mono text-xs">{c.quantity} {c.unit}</div>
+                                {cost && <div className="text-gold font-mono text-xs">{cost} руб</div>}
+                              </div>
+                            </div>
                           </div>
-                          <div className="text-gold font-mono text-xs ml-4 whitespace-nowrap">{c.quantity} {c.unit}</div>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   </div>
                 )}
+
+                {/* Итого */}
                 <div className="mt-4 pt-4 border-t border-forest-light/40 flex justify-between items-center">
                   <span className="text-muted text-xs font-body uppercase tracking-widest">Себестоимость</span>
                   <span className="text-gold font-mono font-semibold">{Number(selected.total_sku_cost).toFixed(2)} руб</span>

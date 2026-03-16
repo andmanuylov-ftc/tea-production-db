@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import PageHeader from '../components/PageHeader'
-import { ChevronDown, ChevronRight, FileText } from 'lucide-react'
+import { ChevronDown, ChevronRight, FileText, Search, X } from 'lucide-react'
 
 const VAT = 0.22
 
@@ -11,6 +11,7 @@ export default function PriceLists() {
   const [openId, setOpenId] = useState(null)
   const [items, setItems] = useState({})
   const [loadingItems, setLoadingItems] = useState({})
+  const [search, setSearch] = useState('')
 
   useEffect(() => {
     supabase
@@ -62,6 +63,15 @@ export default function PriceLists() {
     return Number(val).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   }
 
+  function filtered(listItems) {
+    if (!search.trim()) return listItems
+    const q = search.toLowerCase()
+    return listItems.filter(i =>
+      (i.products?.article ?? '').toLowerCase().includes(q) ||
+      (i.products?.name ?? '').toLowerCase().includes(q)
+    )
+  }
+
   return (
     <div className="p-8">
       <PageHeader
@@ -105,77 +115,128 @@ export default function PriceLists() {
                 </div>
               </button>
 
-              {/* Таблица */}
+              {/* Поиск + таблица */}
               {openId === l.id && (
-                <div className="mt-4 -mx-6 overflow-x-auto">
-                  {loadingItems[l.id] ? (
-                    <div className="px-6 pb-4 text-muted text-sm font-mono animate-pulse">Загрузка позиций...</div>
-                  ) : (
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-t border-forest-light/20">
-                          <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-6 py-3 w-8">#</th>
-                          <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-3">Артикул</th>
-                          <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-3">Наименование</th>
-                          <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-4 py-3">Фасовка</th>
-                          <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-4 py-3">Себест., руб</th>
-                          <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-4 py-3 text-gold">Цена без НДС, руб</th>
-                          <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-6 py-3 text-gold/70">Цена с НДС 22%, руб</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(items[l.id] ?? []).map((item, idx) => {
-                          const priceNoVat = Number(item.price) || 0
-                          const priceVat = priceNoVat * (1 + VAT)
-                          return (
-                            <tr
-                              key={item.id}
-                              className={`border-t border-forest-light/10 hover:bg-forest-light/5 transition-colors ${idx % 2 !== 0 ? 'bg-forest-light/5' : ''}`}
-                            >
-                              <td className="px-6 py-2.5 text-muted font-mono text-xs text-right">{idx + 1}</td>
-                              <td className="px-4 py-2.5">
-                                <span className="badge bg-gold/10 text-gold border border-gold/20 font-mono text-xs px-2 py-0.5 rounded whitespace-nowrap">
-                                  {item.products?.article ?? '—'}
-                                </span>
-                              </td>
-                              <td className="px-4 py-2.5 text-cream font-body">{item.products?.name ?? '—'}</td>
-                              <td className="px-4 py-2.5 text-muted font-mono text-right whitespace-nowrap">
-                                {item.products?.package_size ? `${item.products.package_size} ${item.products.package_unit}` : '—'}
-                              </td>
-                              <td className="px-4 py-2.5 text-cream font-mono text-right">
-                                {fmt(item.cost?.total_sku_cost)}
-                              </td>
-                              <td className="px-4 py-2.5 text-gold font-mono text-right font-medium">
-                                {fmt(priceNoVat)}
-                              </td>
-                              <td className="px-6 py-2.5 text-gold/70 font-mono text-right">
-                                {fmt(priceVat)}
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
+                <div className="mt-4">
+                  {/* Строка поиска */}
+                  <div className="relative mb-4 max-w-sm">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
+                    <input
+                      type="text"
+                      value={search}
+                      onChange={e => setSearch(e.target.value)}
+                      placeholder="Поиск по артикулу или названию…"
+                      className="w-full bg-forest-dark border border-forest-light/40 rounded-lg pl-9 pr-8 py-2
+                                 text-cream text-sm font-body focus:outline-none focus:border-gold/50 placeholder:text-muted"
+                    />
+                    {search && (
+                      <button
+                        onClick={() => setSearch('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-cream transition-colors"
+                      >
+                        <X size={13} />
+                      </button>
+                    )}
+                  </div>
 
-                      {/* Итого */}
-                      {items[l.id]?.length > 0 && (() => {
-                        const totalCost = items[l.id].reduce((s, i) => s + (Number(i.cost?.total_sku_cost) || 0), 0)
-                        const totalNoVat = items[l.id].reduce((s, i) => s + (Number(i.price) || 0), 0)
-                        const totalVat = totalNoVat * (1 + VAT)
-                        return (
-                          <tfoot>
-                            <tr className="border-t-2 border-gold/30">
-                              <td colSpan={4} className="px-6 py-3 text-muted text-xs font-body">
-                                Итого: {items[l.id].length} позиций
-                              </td>
-                              <td className="px-4 py-3 text-cream font-mono text-right font-medium">{fmt(totalCost)}</td>
-                              <td className="px-4 py-3 text-gold font-mono text-right font-medium">{fmt(totalNoVat)}</td>
-                              <td className="px-6 py-3 text-gold/70 font-mono text-right font-medium">{fmt(totalVat)}</td>
+                  {/* Таблица */}
+                  <div className="-mx-6 overflow-x-auto">
+                    {loadingItems[l.id] ? (
+                      <div className="px-6 pb-4 text-muted text-sm font-mono animate-pulse">Загрузка позиций...</div>
+                    ) : (() => {
+                      const rows = filtered(items[l.id] ?? [])
+                      return (
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-t border-forest-light/20">
+                              <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-6 py-3 w-8">#</th>
+                              <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-3">Артикул</th>
+                              <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-3">Наименование</th>
+                              <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-4 py-3">Фасовка</th>
+                              <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-4 py-3">Себест., руб</th>
+                              <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-4 py-3 text-gold">Цена без НДС, руб</th>
+                              <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-6 py-3 text-gold/70">Цена с НДС 22%, руб</th>
                             </tr>
-                          </tfoot>
-                        )
-                      })()}
-                    </table>
-                  )}
+                          </thead>
+                          <tbody>
+                            {rows.length === 0 ? (
+                              <tr>
+                                <td colSpan={7} className="px-6 py-8 text-center text-muted text-sm font-body">
+                                  Ничего не найдено по запросу «{search}»
+                                </td>
+                              </tr>
+                            ) : rows.map((item, idx) => {
+                              const priceNoVat = Number(item.price) || 0
+                              const priceVat = priceNoVat * (1 + VAT)
+
+                              // Подсветка совпадений
+                              function highlight(text) {
+                                if (!search.trim()) return text
+                                const q = search.trim()
+                                const idx = text.toLowerCase().indexOf(q.toLowerCase())
+                                if (idx === -1) return text
+                                return (
+                                  <>
+                                    {text.slice(0, idx)}
+                                    <mark className="bg-gold/30 text-cream rounded px-0.5">{text.slice(idx, idx + q.length)}</mark>
+                                    {text.slice(idx + q.length)}
+                                  </>
+                                )
+                              }
+
+                              return (
+                                <tr
+                                  key={item.id}
+                                  className={`border-t border-forest-light/10 hover:bg-forest-light/5 transition-colors ${idx % 2 !== 0 ? 'bg-forest-light/5' : ''}`}
+                                >
+                                  <td className="px-6 py-2.5 text-muted font-mono text-xs text-right">{idx + 1}</td>
+                                  <td className="px-4 py-2.5">
+                                    <span className="badge bg-gold/10 text-gold border border-gold/20 font-mono text-xs px-2 py-0.5 rounded whitespace-nowrap">
+                                      {highlight(item.products?.article ?? '—')}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-2.5 text-cream font-body">
+                                    {highlight(item.products?.name ?? '—')}
+                                  </td>
+                                  <td className="px-4 py-2.5 text-muted font-mono text-right whitespace-nowrap">
+                                    {item.products?.package_size ? `${item.products.package_size} ${item.products.package_unit}` : '—'}
+                                  </td>
+                                  <td className="px-4 py-2.5 text-cream font-mono text-right">
+                                    {fmt(item.cost?.total_sku_cost)}
+                                  </td>
+                                  <td className="px-4 py-2.5 text-gold font-mono text-right font-medium">
+                                    {fmt(priceNoVat)}
+                                  </td>
+                                  <td className="px-6 py-2.5 text-gold/70 font-mono text-right">
+                                    {fmt(priceVat)}
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+
+                          {/* Итого */}
+                          {rows.length > 0 && (() => {
+                            const totalCost   = rows.reduce((s, i) => s + (Number(i.cost?.total_sku_cost) || 0), 0)
+                            const totalNoVat  = rows.reduce((s, i) => s + (Number(i.price) || 0), 0)
+                            const totalVat    = totalNoVat * (1 + VAT)
+                            return (
+                              <tfoot>
+                                <tr className="border-t-2 border-gold/30">
+                                  <td colSpan={4} className="px-6 py-3 text-muted text-xs font-body">
+                                    {search ? `Найдено: ${rows.length} из ${items[l.id].length}` : `Итого: ${rows.length} позиций`}
+                                  </td>
+                                  <td className="px-4 py-3 text-cream font-mono text-right font-medium">{fmt(totalCost)}</td>
+                                  <td className="px-4 py-3 text-gold font-mono text-right font-medium">{fmt(totalNoVat)}</td>
+                                  <td className="px-6 py-3 text-gold/70 font-mono text-right font-medium">{fmt(totalVat)}</td>
+                                </tr>
+                              </tfoot>
+                            )
+                          })()}
+                        </table>
+                      )
+                    })()}
+                  </div>
                 </div>
               )}
             </div>

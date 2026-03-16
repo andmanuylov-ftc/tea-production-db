@@ -75,7 +75,7 @@ export default function PriceLists() {
   return (
     <div className="p-8">
       <PageHeader
-        title="Прайс-листы"
+        title="ПРАЙС ЛИСТ"
         subtitle="Цены без НДС и с НДС (22%)"
         action={
           <div className="flex items-center gap-2 text-muted text-xs font-body">

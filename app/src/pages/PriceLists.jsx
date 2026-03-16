@@ -169,17 +169,16 @@ export default function PriceLists() {
                               const priceNoVat = Number(item.price) || 0
                               const priceVat = priceNoVat * (1 + VAT)
 
-                              // Подсветка совпадений
                               function highlight(text) {
                                 if (!search.trim()) return text
                                 const q = search.trim()
-                                const idx = text.toLowerCase().indexOf(q.toLowerCase())
-                                if (idx === -1) return text
+                                const i = text.toLowerCase().indexOf(q.toLowerCase())
+                                if (i === -1) return text
                                 return (
                                   <>
-                                    {text.slice(0, idx)}
-                                    <mark className="bg-gold/30 text-cream rounded px-0.5">{text.slice(idx, idx + q.length)}</mark>
-                                    {text.slice(idx + q.length)}
+                                    {text.slice(0, i)}
+                                    <mark className="bg-gold/30 text-cream rounded px-0.5">{text.slice(i, i + q.length)}</mark>
+                                    {text.slice(i + q.length)}
                                   </>
                                 )
                               }
@@ -214,25 +213,6 @@ export default function PriceLists() {
                               )
                             })}
                           </tbody>
-
-                          {/* Итого */}
-                          {rows.length > 0 && (() => {
-                            const totalCost   = rows.reduce((s, i) => s + (Number(i.cost?.total_sku_cost) || 0), 0)
-                            const totalNoVat  = rows.reduce((s, i) => s + (Number(i.price) || 0), 0)
-                            const totalVat    = totalNoVat * (1 + VAT)
-                            return (
-                              <tfoot>
-                                <tr className="border-t-2 border-gold/30">
-                                  <td colSpan={4} className="px-6 py-3 text-muted text-xs font-body">
-                                    {search ? `Найдено: ${rows.length} из ${items[l.id].length}` : `Итого: ${rows.length} позиций`}
-                                  </td>
-                                  <td className="px-4 py-3 text-cream font-mono text-right font-medium">{fmt(totalCost)}</td>
-                                  <td className="px-4 py-3 text-gold font-mono text-right font-medium">{fmt(totalNoVat)}</td>
-                                  <td className="px-6 py-3 text-gold/70 font-mono text-right font-medium">{fmt(totalVat)}</td>
-                                </tr>
-                              </tfoot>
-                            )
-                          })()}
                         </table>
                       )
                     })()}

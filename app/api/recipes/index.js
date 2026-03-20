@@ -1,29 +1,25 @@
-/**
- * GET /api/recipes         — все рецепты
- * GET /api/recipes?article=2306  — конкретный рецепт
- */
+// GET /api/recipes          — список всех рецептов
+// GET /api/recipes?active=1 — только активные
+import { supabase } from '../_db.js';
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-  const SUPABASE_URL = process.env.SUPABASE_URL;
-  const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  try {
+    let query = supabase
+      .from('recipes')
+      .select('id, article, name, output_quantity, output_unit, is_active, notes')
+      .order('article');
 
-  const { article } = req.query;
-  const filter = article ? `&article=eq.${encodeURIComponent(article)}` : '';
+    if (req.query.active === '1') {
+      query = query.eq('is_active', true);
+    }
 
-  const url = `${SUPABASE_URL}/rest/v1/recipes?select=id,article,name,output_quantity,output_unit,is_active${filter}&order=article`;
+    const { data, error } = await query;
+    if (error) throw error;
 
-  const response = await fetch(url, {
-    headers: {
-      'apikey': SUPABASE_SERVICE_KEY,
-      'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
-      'Accept': 'application/json',
-    },
-  });
-
-  const data = await response.json();
-  if (!response.ok) return res.status(500).json({ error: data.message || 'DB error' });
-
-  return res.status(200).json({ count: data.length, recipes: data });
+    res.status(200).json({ count: data.length, recipes: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 }

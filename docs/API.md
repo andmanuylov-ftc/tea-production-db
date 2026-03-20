@@ -1,76 +1,96 @@
-# Tea Production API — Stable Endpoints
+# Tea Production API
 
-Базовый URL: `https://<your-vercel-domain>.vercel.app`
+Все роуты доступны через Vercel. Используй `web_fetch` в Claude для запросов.
 
-Все эндпоинты работают **без MCP, без OAuth**, только через `web_fetch` или браузер.
+## Base URL
+```
+https://tea-production-db.vercel.app
+```
+
+## Роуты
+
+### 🔍 Проверка соединения
+```
+GET /api/health
+```
+Возвращает статус БД и количество позиций сырья. **Вызывай в начале каждой сессии.**
 
 ---
 
-## Проверка состояния
+### 🌿 Сырьё и материалы
 
-```
-GET /api/status
-```
-Показывает: подключение к БД, количество записей в ключевых таблицах, наличие env vars.
-
----
-
-## Сырьё и материалы
-
+**Поиск по артикулу или названию:**
 ```
 GET /api/materials/search?q=5214
-GET /api/materials/search?q=ройбуш
-GET /api/materials/by-article?article=5214/1
+GET /api/materials/search?q=бергамот
+```
+
+**Получить по точному артикулу** (/ кодируется как %2F):
+```
+GET /api/materials/5214%2F1
 ```
 
 ---
 
-## Рецепты
+### 📋 Рецепты
 
+**Список всех рецептов:**
 ```
 GET /api/recipes
-GET /api/recipes?article=2306
-GET /api/recipes/ingredients?recipe_id=42
+GET /api/recipes?active=1
+```
+
+**Рецепт + состав + себестоимость:**
+```
+GET /api/recipes/2105
+GET /api/recipes/123
 ```
 
 ---
 
-## SKU
+### 📦 SKU
 
+**Список всех SKU:**
 ```
 GET /api/sku
-GET /api/sku?article=2306-ПА500
+GET /api/sku?type_id=38
+```
+
+**SKU + состав + себестоимость:**
+```
+GET /api/sku/2105-10
 ```
 
 ---
 
-## Себестоимость
+### 💰 Себестоимость
 
 ```
-GET /api/costs?type=recipes
-GET /api/costs?type=sku
+GET /api/costs              — всё
+GET /api/costs?type=recipe  — только рецепты
+GET /api/costs?type=sku     — только SKU
 ```
 
 ---
 
-## Произвольный SQL (защищён ключом)
+## Настройка Vercel (обязательно)
 
+Добавь в Vercel → Settings → Environment Variables:
 ```
-POST /api/db/query
-Headers: x-api-key: <API_SECRET>
-Body: { "sql": "SELECT * FROM raw_materials WHERE article = '5214/1'" }
+SUPABASE_URL=https://heznxwdrwyjipyracyqy.supabase.co
+SUPABASE_SERVICE_KEY=<твой service_role key из Supabase Settings → API>
 ```
 
-Только SELECT-запросы. `API_SECRET` — переменная окружения в Vercel.
+> ⚠️ Используй `service_role` key (не `anon`) — он не протухает и даёт полный доступ.
 
 ---
 
-## Необходимые Vercel Environment Variables
+## Как Claude использует API
 
-| Переменная | Откуда взять |
-|---|---|
-| `SUPABASE_URL` | Supabase → Project Settings → API → Project URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Project Settings → API → service_role key |
-| `API_SECRET` | Придумать самостоятельно, любая строка |
+Вместо Supabase MCP, который ломается при каждой сессии, Claude делает обычный HTTP-запрос:
 
-⚠️ `service_role` ключ — секретный. Никогда не публикуй его в коде.
+```
+web_fetch: https://tea-production-db.vercel.app/api/materials/search?q=5214
+```
+
+Это работает всегда — без OAuth, без переподключений, без токенов.

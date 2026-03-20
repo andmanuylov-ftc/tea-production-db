@@ -10,6 +10,39 @@
 | Supabase URL | `https://heznxwdrwyjipyracyqy.supabase.co` |
 | GitHub | `andmanuylov-ftc/tea-production-db` |
 | Vercel | авто-деплой при push в main |
+| **API base URL** | `https://<домен>.vercel.app` (уточни после первого деплоя) |
+
+---
+
+## 🔌 Стабильный доступ к БД — Vercel API
+
+> **MCP Supabase нестабилен — НЕ использовать.** Все запросы к БД идут через Vercel API endpoints.
+> Claude использует `web_fetch` для вызова этих URL. Никакого OAuth, никаких токенов.
+
+### Endpoints
+
+| Метод | URL | Описание |
+|---|---|---|
+| GET | `/api/status` | Проверка API и БД (вызывать в начале сессии) |
+| GET | `/api/materials/search?q=5214` | Поиск сырья по артикулу или названию |
+| GET | `/api/materials/by-article?article=5214/1` | Точный поиск по артикулу |
+| GET | `/api/recipes` | Все рецепты |
+| GET | `/api/recipes?article=2306` | Конкретный рецепт |
+| GET | `/api/recipes/ingredients?recipe_id=42` | Состав рецепта |
+| GET | `/api/sku` | Все SKU |
+| GET | `/api/sku?article=2306-ПА500` | Конкретный SKU |
+| GET | `/api/costs?type=recipes` | Себестоимость рецептов |
+| GET | `/api/costs?type=sku` | Себестоимость SKU |
+| POST | `/api/db/query` + header `x-api-key` | Произвольный SELECT-запрос |
+
+### Необходимые Vercel Environment Variables
+Нужно добавить в Vercel Dashboard → Project → Settings → Environment Variables:
+
+| Переменная | Откуда взять |
+|---|---|
+| `SUPABASE_URL` | Supabase → Project Settings → API → Project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Project Settings → API → service_role |
+| `API_SECRET` | Придумать самому (любая строка) |
 
 ---
 
@@ -62,7 +95,7 @@
 
 ---
 
-## Текущий статус (обновлено: 18.03.2026)
+## Текущий статус (обновлено: 20.03.2026)
 
 ### Сырьё
 - Загружено **442 позиции**, цены на 07.03.2026
@@ -142,6 +175,8 @@
 
 ## Следующие задачи
 
+- [ ] Прописать API_BASE_URL в CONTEXT.md после деплоя на Vercel
+- [ ] Добавить env vars в Vercel (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, API_SECRET)
 - [ ] Продолжить ввод рецептов
 - [ ] Продолжить ввод SKU
 - [ ] Создать прайслисты
@@ -150,8 +185,6 @@
 ---
 
 ## Стандартная фраза для начала сессии
-
-Скопируй и отправь в начале диалога:
 
 ```
 Продолжаем проект чайного производства.
@@ -165,7 +198,10 @@ GitHub: andmanuylov-ftc/tea-production-db
 ## Инструкция для Claude
 
 1. Прочитать этот файл — `docs/CONTEXT.md`
-2. Ответить кратким подтверждением: сколько рецептов, SKU, что следующее
-3. Спросить: "Что вводим?"
-4. После сессии — обновить этот файл (статус рецептов, SKU, задачи)
-5. При заведении нового SKU — выбирать type_id по таблице категорий выше, исходя из состава рецепта
+2. **НЕ использовать MCP Supabase** — он нестабилен
+3. Для работы с БД — использовать `web_fetch` на Vercel API endpoints (секция выше)
+4. В начале сессии вызвать `GET /api/status` для проверки подключения
+5. Ответить кратким подтверждением: сколько рецептов, SKU, что следующее
+6. Спросить: "Что вводим?"
+7. После сессии — обновить этот файл (статус рецептов, SKU, задачи)
+8. При заведении нового SKU — выбирать type_id по таблице категорий, исходя из состава рецепта

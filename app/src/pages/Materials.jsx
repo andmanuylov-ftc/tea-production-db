@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import PageHeader from '../components/PageHeader'
-import { Search, Pencil, Trash2, X, Check, Clock } from 'lucide-react'
+import { Search, Pencil, Trash2, X, Check, Clock, MoreHorizontal } from 'lucide-react'
 
 export default function Materials() {
   const [rows, setRows]               = useState([])
@@ -14,12 +14,25 @@ export default function Materials() {
   const [histLoading, setHistLoading] = useState(false)
   const [saving, setSaving]           = useState(false)
   const [confirmId, setConfirmId]     = useState(null)
+  const [openMenuId, setOpenMenuId]   = useState(null)
   const mounted = useRef(true)
+  const menuRef = useRef(null)
 
   useEffect(() => {
     mounted.current = true
     loadRows()
     return () => { mounted.current = false }
+  }, [])
+
+  // Закрывать меню при клике вне его
+  useEffect(() => {
+    function handleClick(e) {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setOpenMenuId(null)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
   }, [])
 
   async function loadRows() {
@@ -31,6 +44,7 @@ export default function Materials() {
   }
 
   async function openEdit(row) {
+    setOpenMenuId(null)
     setEditRow(row)
     setEditName(row.name)
     setEditPrice('')
@@ -48,26 +62,18 @@ export default function Materials() {
   async function saveEdit() {
     if (!editRow) return
     setSaving(true)
-
     const ops = []
-
     if (editName.trim() && editName.trim() !== editRow.name) {
-      ops.push(
-        supabase.from('raw_materials').update({ name: editName.trim() }).eq('id', editRow.id)
-      )
+      ops.push(supabase.from('raw_materials').update({ name: editName.trim() }).eq('id', editRow.id))
     }
-
     const priceVal = parseFloat(editPrice.replace(',', '.'))
     if (!isNaN(priceVal) && priceVal > 0) {
-      ops.push(
-        supabase.from('material_prices').insert({
-          material_id:    editRow.id,
-          price_per_unit: priceVal,
-          valid_from:     new Date().toISOString().slice(0, 10),
-        })
-      )
+      ops.push(supabase.from('material_prices').insert({
+        material_id:    editRow.id,
+        price_per_unit: priceVal,
+        valid_from:     new Date().toISOString().slice(0, 10),
+      }))
     }
-
     await Promise.all(ops)
     await loadRows()
     if (mounted.current) { setSaving(false); setEditRow(null) }
@@ -76,6 +82,7 @@ export default function Materials() {
   async function deleteRow(id) {
     await supabase.from('raw_materials').delete().eq('id', id)
     setConfirmId(null)
+    setOpenMenuId(null)
     setRows(prev => prev.filter(r => r.id !== id))
   }
 
@@ -121,7 +128,7 @@ export default function Materials() {
                 <th className="text-muted text-xs uppercase tracking-widest p-4 font-body">Ед.</th>
                 <th className="text-muted text-xs uppercase tracking-widest p-4 font-body text-right">Цена без НДС, руб.</th>
                 <th className="text-muted text-xs uppercase tracking-widest p-4 font-body text-right">Дата цены</th>
-                <th className="text-muted text-xs uppercase tracking-widest p-4 font-body w-36"></th>
+                <th className="w-12"></th>
               </tr>
             </thead>
             <tbody>
@@ -140,33 +147,60 @@ export default function Materials() {
                   <td className="p-4 text-muted text-sm font-mono">{r.unit}</td>
                   <td className="p-4 text-right font-mono text-sm text-gold">{fmt(r.current_price)}</td>
                   <td className="p-4 text-right font-mono text-xs text-muted">{fmtDate(r.price_date)}</td>
-                  <td className="p-4 text-right">
-                    {confirmId === r.id ? (
-                      <div className="flex items-center justify-end gap-2">
-                        <span className="text-xs text-muted font-body">Удалить?</span>
-                        <button onClick={() => deleteRow(r.id)} className="text-red-400 hover:text-red-300 transition-colors">
-                          <Check size={14} />
-                        </button>
-                        <button onClick={() => setConfirmId(null)} className="text-muted hover:text-cream transition-colors">
-                          <X size={14} />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center justify-end gap-3">
-                        <button
-                          onClick={() => openEdit(r)}
-                          className="flex items-center gap-1 text-muted hover:text-gold transition-colors text-xs font-body"
-                        >
-                          <Pencil size={12} /> Изменить
-                        </button>
-                        <button
-                          onClick={() => setConfirmId(r.id)}
-                          className="flex items-center gap-1 text-muted hover:text-red-400 transition-colors text-xs font-body"
-                        >
-                          <Trash2 size={12} /> Удалить
-                        </button>
-                      </div>
-                    )}
+
+                  {/* Три точки + выпадающее меню */}
+                  <td className="p-2 text-right" ref={openMenuId === r.id ? menuRef : null}>
+                    <div className="relative inline-block">
+                      <button
+                        onClick={() => setOpenMenuId(openMenuId === r.id ? null : r.id)}
+                        className="p-1.5 rounded-md text-muted hover:text-cream hover:bg-forest-light/50 transition-colors"
+                      >
+                        <MoreHorizontal size={16} />
+                      </button>
+
+                      {openMenuId === r.id && (
+                        <div className="absolute right-0 top-8 z-50 w-40 bg-forest border border-forest-light/50
+                                        rounded-lg shadow-lg overflow-hidden">
+                          <button
+                            onClick={() => openEdit(r)}
+                            className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-body
+                                       text-cream hover:bg-forest-light/50 transition-colors text-left"
+                          >
+                            <Pencil size={13} className="text-muted" />
+                            Изменить
+                          </button>
+                          {confirmId === r.id ? (
+                            <div className="px-4 py-2.5 border-t border-forest-light/30">
+                              <p className="text-xs text-muted font-body mb-2">Удалить позицию?</p>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => deleteRow(r.id)}
+                                  className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 transition-colors"
+                                >
+                                  <Check size={12} /> Да
+                                </button>
+                                <button
+                                  onClick={() => { setConfirmId(null); setOpenMenuId(null) }}
+                                  className="flex items-center gap-1 text-xs text-muted hover:text-cream transition-colors"
+                                >
+                                  <X size={12} /> Нет
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setConfirmId(r.id)}
+                              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-body
+                                         text-red-400 hover:bg-red-400/10 transition-colors text-left
+                                         border-t border-forest-light/30"
+                            >
+                              <Trash2 size={13} />
+                              Удалить
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -215,7 +249,6 @@ export default function Materials() {
               />
             </div>
 
-            {/* История цен */}
             <div className="mb-5">
               <div className="flex items-center gap-2 mb-2">
                 <Clock size={13} className="text-muted" />
@@ -227,18 +260,14 @@ export default function Materials() {
                 <p className="text-muted text-xs font-mono animate-pulse">Загрузка...</p>
               ) : history.length === 0 ? (
                 <p className="text-muted text-xs font-body">Цен не найдено</p>
-              ) : (
-                <div className="space-y-0">
-                  {history.map((h, i) => (
-                    <div key={i} className="flex justify-between items-center py-2 border-b border-forest-light/30">
-                      <span className="text-muted text-xs font-mono">{fmtDate(h.valid_from)}</span>
-                      <span className={`font-mono text-xs ${i === 0 ? 'text-gold font-semibold' : 'text-muted'}`}>
-                        {fmt(h.price_per_unit)} руб.
-                      </span>
-                    </div>
-                  ))}
+              ) : history.map((h, i) => (
+                <div key={i} className="flex justify-between items-center py-2 border-b border-forest-light/30">
+                  <span className="text-muted text-xs font-mono">{fmtDate(h.valid_from)}</span>
+                  <span className={`font-mono text-xs ${i === 0 ? 'text-gold font-semibold' : 'text-muted'}`}>
+                    {fmt(h.price_per_unit)} руб.
+                  </span>
                 </div>
-              )}
+              ))}
             </div>
 
             <button

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { ArrowLeft, Plus, Trash2, Package, FlaskConical, Leaf, Search, X } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, Package, FlaskConical, Search, X } from 'lucide-react'
 
 const META = {
   OLD_TEA: { label: 'Старый ассортимент', color: 'text-amber-400', bg: 'bg-amber-400/10', border: 'border-amber-400/30' },
@@ -9,9 +9,8 @@ const META = {
 }
 
 const TABS = [
-  { key: 'recipes',   icon: FlaskConical, label: 'Рецепты' },
-  { key: 'sku',       icon: Package,      label: 'SKU' },
-  { key: 'materials', icon: Leaf,         label: 'Сырьё и материалы' },
+  { key: 'recipes', icon: FlaskConical, label: 'Рецепты' },
+  { key: 'sku',     icon: Package,      label: 'SKU' },
 ]
 
 export default function AssortmentDetail() {
@@ -44,17 +43,10 @@ export default function AssortmentDetail() {
         .eq('assortment_id', assortmentId)
         .order('id')
       setItems(data ?? [])
-    } else if (tab === 'recipes') {
+    } else {
       const { data } = await supabase
         .from('assortment_recipes')
         .select('id, recipes(id, article, name)')
-        .eq('assortment_id', assortmentId)
-        .order('id')
-      setItems(data ?? [])
-    } else {
-      const { data } = await supabase
-        .from('assortment_materials')
-        .select('id, raw_materials(id, article, name)')
         .eq('assortment_id', assortmentId)
         .order('id')
       setItems(data ?? [])
@@ -66,11 +58,8 @@ export default function AssortmentDetail() {
     if (tab === 'sku') {
       const { data } = await supabase.from('products').select('id, article, name').order('article')
       setAllOptions(data ?? [])
-    } else if (tab === 'recipes') {
-      const { data } = await supabase.from('recipes').select('id, article, name').order('article')
-      setAllOptions(data ?? [])
     } else {
-      const { data } = await supabase.from('raw_materials').select('id, article, name').order('article')
+      const { data } = await supabase.from('recipes').select('id, article, name').order('article')
       setAllOptions(data ?? [])
     }
   }, [tab])
@@ -78,23 +67,16 @@ export default function AssortmentDetail() {
   useEffect(() => { loadItems() }, [loadItems])
   useEffect(() => { loadAllOptions() }, [loadAllOptions])
 
-  const getObjFromRow = (row) => {
-    if (tab === 'sku') return row.products
-    if (tab === 'recipes') return row.recipes
-    return row.raw_materials
-  }
-
-  const inAssortment = new Set(items.map(i => getObjFromRow(i)?.id))
+  const getObj = (row) => tab === 'sku' ? row.products : row.recipes
+  const inAssortment = new Set(items.map(i => getObj(i)?.id))
 
   async function addItem(option) {
     if (!assortmentId || inAssortment.has(option.id)) return
     setSaving(true)
     if (tab === 'sku') {
       await supabase.from('assortment_products').insert({ assortment_id: assortmentId, product_id: option.id })
-    } else if (tab === 'recipes') {
-      await supabase.from('assortment_recipes').insert({ assortment_id: assortmentId, recipe_id: option.id })
     } else {
-      await supabase.from('assortment_materials').insert({ assortment_id: assortmentId, material_id: option.id })
+      await supabase.from('assortment_recipes').insert({ assortment_id: assortmentId, recipe_id: option.id })
     }
     await loadItems()
     setSaving(false)
@@ -102,14 +84,14 @@ export default function AssortmentDetail() {
 
   async function removeItem(rowId) {
     setSaving(true)
-    const table = tab === 'sku' ? 'assortment_products' : tab === 'recipes' ? 'assortment_recipes' : 'assortment_materials'
+    const table = tab === 'sku' ? 'assortment_products' : 'assortment_recipes'
     await supabase.from(table).delete().eq('id', rowId)
     await loadItems()
     setSaving(false)
   }
 
   const filtered = items.filter(i => {
-    const obj = getObjFromRow(i)
+    const obj = getObj(i)
     const q = search.toLowerCase()
     return (obj?.article ?? '').toLowerCase().includes(q) || (obj?.name ?? '').toLowerCase().includes(q)
   })
@@ -117,7 +99,7 @@ export default function AssortmentDetail() {
   const addFiltered = allOptions.filter(o => {
     if (inAssortment.has(o.id)) return false
     const q = addSearch.toLowerCase()
-    return (o.article ?? '').toLowerCase().includes(q) || (o.name ?? '').toLowerCase().includes(q)
+    return o.article.toLowerCase().includes(q) || o.name.toLowerCase().includes(q)
   })
 
   return (
@@ -131,7 +113,6 @@ export default function AssortmentDetail() {
       <h1 className="font-display text-2xl font-semibold text-cream mb-1">{m.label}</h1>
       <p className="text-muted text-sm font-body mb-6">{items.length} позиций в текущей вкладке</p>
 
-      {/* Tabs */}
       <div className="flex gap-1 mb-6 bg-forest rounded-lg p-1 w-fit">
         {TABS.map(({ key, icon: Icon, label }) => (
           <button
@@ -188,7 +169,7 @@ export default function AssortmentDetail() {
                 ) : filtered.length === 0 ? (
                   <tr><td colSpan={3} className="p-4 text-muted text-sm font-body">Пусто — добавьте позиции через кнопку «Добавить»</td></tr>
                 ) : filtered.map(row => {
-                  const obj = getObjFromRow(row)
+                  const obj = getObj(row)
                   return (
                     <tr key={row.id} className="table-row">
                       <td className="p-4">
@@ -208,18 +189,16 @@ export default function AssortmentDetail() {
           </div>
         </div>
 
-        {/* Add panel */}
         {showAdd && (
           <div className="w-80 flex-shrink-0 card">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-display text-sm font-semibold text-cream">
-                Добавить {tab === 'sku' ? 'SKU' : tab === 'recipes' ? 'рецепт' : 'сырьё'}
+                Добавить {tab === 'sku' ? 'SKU' : 'рецепт'}
               </h3>
               <button onClick={() => setShowAdd(false)} className="text-muted hover:text-cream">
                 <X size={16} />
               </button>
             </div>
-
             <div className="relative mb-3">
               <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
               <input
@@ -231,7 +210,6 @@ export default function AssortmentDetail() {
                            focus:outline-none focus:border-gold/50"
               />
             </div>
-
             <div className="space-y-1 max-h-96 overflow-y-auto">
               {addFiltered.length === 0 ? (
                 <p className="text-muted text-xs font-body py-2">Все позиции уже добавлены</p>

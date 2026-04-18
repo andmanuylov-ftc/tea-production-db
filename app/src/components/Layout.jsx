@@ -12,14 +12,13 @@ const nav = [
   { to: '/dashboard',   label: 'Дашборд',      icon: LayoutDashboard },
   { to: '/recipes',     label: 'Рецепты',       icon: FlaskConical },
   { to: '/skus',        label: 'SKU',           icon: Package },
+  { to: '/materials',   label: 'Сырьё',         icon: Leaf },
 ]
 
 export default function Layout({ children }) {
   return (
     <div className="flex h-screen overflow-hidden">
-      {/* Sidebar */}
       <aside className="w-60 flex-shrink-0 bg-forest border-r border-forest-light/40 flex flex-col">
-        {/* Logo */}
         <div className="px-6 py-6 border-b border-forest-light/40">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-gold/20 flex items-center justify-center">
@@ -32,7 +31,6 @@ export default function Layout({ children }) {
           </div>
         </div>
 
-        {/* Nav */}
         <nav className="flex-1 px-3 py-4 space-y-1">
           {nav.map(({ to, label, icon: Icon }) => (
             <NavLink
@@ -52,13 +50,11 @@ export default function Layout({ children }) {
           ))}
         </nav>
 
-        {/* Footer */}
         <div className="px-6 py-4 border-t border-forest-light/40">
           <div className="text-muted text-xs font-mono">v0.2.0</div>
         </div>
       </aside>
 
-      {/* Main */}
       <main className="flex-1 overflow-y-auto bg-forest-dark">
         {children}
       </main>

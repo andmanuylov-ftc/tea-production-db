@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import PageHeader from '../components/PageHeader'
 import { ChevronDown, ChevronRight, FileText, Search, X } from 'lucide-react'
@@ -6,50 +6,95 @@ import { ChevronDown, ChevronRight, FileText, Search, X } from 'lucide-react'
 const VAT = 0.22
 
 export default function PriceLists() {
-  const [lists, setLists] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [openId, setOpenId] = useState(null)
-  const [items, setItems] = useState({})
+  const [lists, setLists]               = useState([])
+  const [loading, setLoading]           = useState(true)
+  const [openId, setOpenId]             = useState(null)
+  const [items, setItems]               = useState({})
   const [loadingItems, setLoadingItems] = useState({})
-  const [search, setSearch] = useState('')
+  const [search, setSearch]             = useState('')
+
+  // Track abort controllers so we can cancel in-flight queries on unmount
+  const abortRefs = useRef({})
+  const mountedRef = useRef(true)
 
   useEffect(() => {
+    mountedRef.current = true
+    const controller = new AbortController()
+    abortRefs.current['__init__'] = controller
+
     supabase
       .from('price_lists')
       .select('id, name, markup_percent')
+      .abortSignal(controller.signal)
       .order('name')
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        if (!mountedRef.current || error) return
         setLists(data ?? [])
         setLoading(false)
-        if (data && data.length === 1) loadItems(data[0].id)
+        // Auto-open if only one price list, but don't pre-fetch (causes navigation freeze)
+        if (data && data.length === 1) {
+          setOpenId(data[0].id)
+          loadItems(data[0].id)
+        }
       })
-  }, [])
+
+    return () => {
+      mountedRef.current = false
+      // Abort all in-flight requests
+      Object.values(abortRefs.current).forEach(c => c.abort())
+    }
+  }, []) // eslint-disable-line
 
   async function loadItems(id) {
     if (items[id]) return
-    setLoadingItems(prev => ({ ...prev, [id]: true }))
 
-    const { data } = await supabase
-      .from('price_list_items')
-      .select(`id, price, products (id, article, name, package_size, package_unit)`)
-      .eq('price_list_id', id)
+    // Cancel any previous load for same id
+    abortRefs.current[id]?.abort()
+    const controller = new AbortController()
+    abortRefs.current[id] = controller
 
-    const productIds = (data ?? []).map(i => i.products?.id).filter(Boolean)
-    let costMap = {}
-    if (productIds.length > 0) {
-      const { data: costs } = await supabase
-        .from('sku_cost')
-        .select('product_id, total_sku_cost')
-        .in('product_id', productIds)
-      ;(costs ?? []).forEach(c => { costMap[c.product_id] = c })
+    if (mountedRef.current) setLoadingItems(prev => ({ ...prev, [id]: true }))
+
+    try {
+      const { data, error } = await supabase
+        .from('price_list_items')
+        .select('id, price, products(id, article, name, package_size, package_unit)')
+        .eq('price_list_id', id)
+        .abortSignal(controller.signal)
+
+      if (!mountedRef.current || error) return
+
+      const productIds = (data ?? []).map(i => i.products?.id).filter(Boolean)
+      let costMap = {}
+
+      if (productIds.length > 0) {
+        const controller2 = new AbortController()
+        abortRefs.current[id + '_costs'] = controller2
+
+        const { data: costs, error: err2 } = await supabase
+          .from('sku_cost')
+          .select('product_id, total_sku_cost')
+          .in('product_id', productIds)
+          .abortSignal(controller2.signal)
+
+        if (!mountedRef.current || err2) return
+        ;(costs ?? []).forEach(c => { costMap[c.product_id] = c })
+      }
+
+      const enriched = (data ?? [])
+        .map(i => ({ ...i, cost: costMap[i.products?.id] ?? null }))
+        .sort((a, b) => (a.products?.article ?? '').localeCompare(b.products?.article ?? ''))
+
+      if (mountedRef.current) {
+        setItems(prev => ({ ...prev, [id]: enriched }))
+        setLoadingItems(prev => ({ ...prev, [id]: false }))
+      }
+    } catch (e) {
+      // AbortError is expected on unmount — silently ignore
+      if (e?.name !== 'AbortError' && mountedRef.current) {
+        setLoadingItems(prev => ({ ...prev, [id]: false }))
+      }
     }
-
-    const enriched = (data ?? [])
-      .map(i => ({ ...i, cost: costMap[i.products?.id] ?? null }))
-      .sort((a, b) => (a.products?.article ?? '').localeCompare(b.products?.article ?? ''))
-
-    setItems(prev => ({ ...prev, [id]: enriched }))
-    setLoadingItems(prev => ({ ...prev, [id]: false }))
   }
 
   function toggleList(id) {
@@ -63,12 +108,26 @@ export default function PriceLists() {
     return Number(val).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   }
 
-  function filtered(listItems) {
+  function filteredRows(listItems) {
     if (!search.trim()) return listItems
     const q = search.toLowerCase()
     return listItems.filter(i =>
       (i.products?.article ?? '').toLowerCase().includes(q) ||
       (i.products?.name ?? '').toLowerCase().includes(q)
+    )
+  }
+
+  function highlight(text) {
+    if (!search.trim()) return text
+    const q = search.trim()
+    const idx = text.toLowerCase().indexOf(q.toLowerCase())
+    if (idx === -1) return text
+    return (
+      <>
+        {text.slice(0, idx)}
+        <mark className="bg-gold/30 text-cream rounded px-0.5">{text.slice(idx, idx + q.length)}</mark>
+        {text.slice(idx + q.length)}
+      </>
     )
   }
 
@@ -118,7 +177,6 @@ export default function PriceLists() {
               {/* Поиск + таблица */}
               {openId === l.id && (
                 <div className="mt-4">
-                  {/* Строка поиска */}
                   <div className="relative mb-4 max-w-sm">
                     <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
                     <input
@@ -139,12 +197,11 @@ export default function PriceLists() {
                     )}
                   </div>
 
-                  {/* Таблица */}
                   <div className="-mx-6 overflow-x-auto">
                     {loadingItems[l.id] ? (
                       <div className="px-6 pb-4 text-muted text-sm font-mono animate-pulse">Загрузка позиций...</div>
                     ) : (() => {
-                      const rows = filtered(items[l.id] ?? [])
+                      const rows = filteredRows(items[l.id] ?? [])
                       return (
                         <table className="w-full text-sm">
                           <thead>
@@ -167,22 +224,7 @@ export default function PriceLists() {
                               </tr>
                             ) : rows.map((item, idx) => {
                               const priceNoVat = Number(item.price) || 0
-                              const priceVat = priceNoVat * (1 + VAT)
-
-                              function highlight(text) {
-                                if (!search.trim()) return text
-                                const q = search.trim()
-                                const i = text.toLowerCase().indexOf(q.toLowerCase())
-                                if (i === -1) return text
-                                return (
-                                  <>
-                                    {text.slice(0, i)}
-                                    <mark className="bg-gold/30 text-cream rounded px-0.5">{text.slice(i, i + q.length)}</mark>
-                                    {text.slice(i + q.length)}
-                                  </>
-                                )
-                              }
-
+                              const priceVat   = priceNoVat * (1 + VAT)
                               return (
                                 <tr
                                   key={item.id}

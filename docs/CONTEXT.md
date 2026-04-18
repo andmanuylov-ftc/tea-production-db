@@ -27,6 +27,15 @@
 - **price_lists** — прайслисты
 - **price_list_items** — позиции прайслиста
 
+### Таблицы ассортиментов (добавлено 18.04.2026)
+- **assortments** — справочник ассортиментов. Поля: `id, code, name, description, created_at`
+  - Текущие записи: `OLD_TEA` (Старый ассортимент), `NEW_TEA` (Новый ассортимент)
+- **assortment_products** — привязка SKU к ассортименту (many-to-many). Поля: `id, assortment_id, product_id, added_at, notes`
+- **assortment_recipes** — привязка рецептов к ассортименту (many-to-many). Поля: `id, assortment_id, recipe_id, added_at, notes`
+
+> Один SKU/рецепт может входить одновременно в OLD_TEA и NEW_TEA.
+> Заполняется вручную + через интерфейс.
+
 ### Views
 - **recipe_cost** — рекурсивный расчёт себестоимости рецепта (руб/кг). Поля: `recipe_id, recipe_article, recipe_name, output_quantity, output_unit, total_cost, cost_per_kg`
 - **sku_cost** — себестоимость SKU. Поля: `product_id, sku_article, product_name, package_size, package_unit, blend_cost, packaging_cost, total_sku_cost`
@@ -102,7 +111,7 @@
 
 ---
 
-## Текущий статус (обновлено: 11.04.2026)
+## Текущий статус (обновлено: 18.04.2026)
 
 ### Сырьё
 - Загружено **442 позиции**, цены на 07.03.2026
@@ -199,10 +208,15 @@
 | 2341-ЗИП100 | Ройбуш | 51.71 руб | 63.09 руб |
 | 7042-ЗИП100 | Гун Тин Пуэр | 148.84 руб | 181.58 руб |
 
+### Ассортименты (добавлено 18.04.2026)
+- **OLD_TEA** — пустой, заполняется вручную
+- **NEW_TEA** — пустой, заполняется вручную
+
 ---
 
 ## Следующие задачи
 
+- [ ] Заполнить OLD_TEA и NEW_TEA (SKU + рецепты) вручную через интерфейс
 - [ ] Продолжить ввод рецептов
 - [ ] Продолжить ввод SKU
 - [ ] Расчёт себестоимости по всем SKU

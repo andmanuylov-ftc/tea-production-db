@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { ArrowLeft, Plus, Trash2, Package, FlaskConical, FileSpreadsheet, Search, X } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, Package, FlaskConical, Search, X } from 'lucide-react'
 
 const META = {
   OLD_TEA: { label: 'Старый ассортимент', color: 'text-amber-400', bg: 'bg-amber-400/10', border: 'border-amber-400/30' },
@@ -9,9 +9,8 @@ const META = {
 }
 
 const TABS = [
-  { key: 'sku',        icon: Package,         label: 'SKU' },
-  { key: 'recipes',    icon: FlaskConical,    label: 'Рецепты' },
-  { key: 'pricelists', icon: FileSpreadsheet, label: 'Прайслисты' },
+  { key: 'sku',     icon: Package,      label: 'SKU' },
+  { key: 'recipes', icon: FlaskConical, label: 'Рецепты' },
 ]
 
 export default function AssortmentDetail() {
@@ -44,19 +43,12 @@ export default function AssortmentDetail() {
         .eq('assortment_id', assortmentId)
         .order('id')
       setItems(data ?? [])
-    } else if (tab === 'recipes') {
+    } else {
       const { data } = await supabase
         .from('assortment_recipes')
         .select('id, notes, recipes(id, article, name)')
         .eq('assortment_id', assortmentId)
         .order('id')
-      setItems(data ?? [])
-    } else {
-      const { data } = await supabase
-        .from('assortment_price_lists')
-        .select('id, added_at, price_lists(id, name, markup_percent, is_active)')
-        .eq('assortment_id', assortmentId)
-        .order('added_at')
       setItems(data ?? [])
     }
     setLoading(false)
@@ -66,11 +58,8 @@ export default function AssortmentDetail() {
     if (tab === 'sku') {
       const { data } = await supabase.from('products').select('id, article, name').order('article')
       setAllOptions(data ?? [])
-    } else if (tab === 'recipes') {
-      const { data } = await supabase.from('recipes').select('id, article, name').order('article')
-      setAllOptions(data ?? [])
     } else {
-      const { data } = await supabase.from('price_lists').select('id, name, markup_percent, is_active').order('name')
+      const { data } = await supabase.from('recipes').select('id, article, name').order('article')
       setAllOptions(data ?? [])
     }
   }, [tab])
@@ -79,11 +68,7 @@ export default function AssortmentDetail() {
   useEffect(() => { loadAllOptions() }, [loadAllOptions])
 
   const inAssortment = new Set(
-    items.map(i => {
-      if (tab === 'sku') return i.products?.id
-      if (tab === 'recipes') return i.recipes?.id
-      return i.price_lists?.id
-    })
+    items.map(i => tab === 'sku' ? i.products?.id : i.recipes?.id)
   )
 
   async function addItem(option) {
@@ -91,10 +76,8 @@ export default function AssortmentDetail() {
     setSaving(true)
     if (tab === 'sku') {
       await supabase.from('assortment_products').insert({ assortment_id: assortmentId, product_id: option.id })
-    } else if (tab === 'recipes') {
-      await supabase.from('assortment_recipes').insert({ assortment_id: assortmentId, recipe_id: option.id })
     } else {
-      await supabase.from('assortment_price_lists').insert({ assortment_id: assortmentId, price_list_id: option.id })
+      await supabase.from('assortment_recipes').insert({ assortment_id: assortmentId, recipe_id: option.id })
     }
     await loadItems()
     setSaving(false)
@@ -102,29 +85,23 @@ export default function AssortmentDetail() {
 
   async function removeItem(rowId) {
     setSaving(true)
-    const table = tab === 'sku' ? 'assortment_products' : tab === 'recipes' ? 'assortment_recipes' : 'assortment_price_lists'
+    const table = tab === 'sku' ? 'assortment_products' : 'assortment_recipes'
     await supabase.from(table).delete().eq('id', rowId)
     await loadItems()
     setSaving(false)
   }
 
-  const isPriceLists = tab === 'pricelists'
+  const filtered = items.filter(i => {
+    const obj = tab === 'sku' ? i.products : i.recipes
+    const q = search.toLowerCase()
+    return (obj?.article ?? '').toLowerCase().includes(q) || (obj?.name ?? '').toLowerCase().includes(q)
+  })
 
-  const filtered = isPriceLists
-    ? items.filter(i => (i.price_lists?.name ?? '').toLowerCase().includes(search.toLowerCase()))
-    : items.filter(i => {
-        const obj = tab === 'sku' ? i.products : i.recipes
-        const q = search.toLowerCase()
-        return (obj?.article ?? '').toLowerCase().includes(q) || (obj?.name ?? '').toLowerCase().includes(q)
-      })
-
-  const addFiltered = isPriceLists
-    ? allOptions.filter(o => !inAssortment.has(o.id) && o.name.toLowerCase().includes(addSearch.toLowerCase()))
-    : allOptions.filter(o => {
-        if (inAssortment.has(o.id)) return false
-        const q = addSearch.toLowerCase()
-        return o.article.toLowerCase().includes(q) || o.name.toLowerCase().includes(q)
-      })
+  const addFiltered = allOptions.filter(o => {
+    if (inAssortment.has(o.id)) return false
+    const q = addSearch.toLowerCase()
+    return o.article.toLowerCase().includes(q) || o.name.toLowerCase().includes(q)
+  })
 
   return (
     <div className="p-8">
@@ -159,7 +136,6 @@ export default function AssortmentDetail() {
       <div className="flex gap-6">
         {/* Main list */}
         <div className="flex-1">
-          {/* Toolbar */}
           <div className="flex items-center gap-3 mb-4">
             <div className="relative flex-1 max-w-xs">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
@@ -182,52 +158,21 @@ export default function AssortmentDetail() {
             </button>
           </div>
 
-          {/* Table */}
           <div className="card p-0 overflow-hidden">
             <table className="w-full">
               <thead className="bg-forest">
                 <tr className="text-left">
-                  {isPriceLists ? (
-                    <>
-                      <th className="text-muted text-xs uppercase tracking-widest p-4 font-body">Название</th>
-                      <th className="text-muted text-xs uppercase tracking-widest p-4 font-body text-right">Наценка</th>
-                      <th className="text-muted text-xs uppercase tracking-widest p-4 font-body text-center">Статус</th>
-                      <th className="text-muted text-xs uppercase tracking-widest p-4 font-body w-12"></th>
-                    </>
-                  ) : (
-                    <>
-                      <th className="text-muted text-xs uppercase tracking-widest p-4 font-body">Артикул</th>
-                      <th className="text-muted text-xs uppercase tracking-widest p-4 font-body">Название</th>
-                      <th className="text-muted text-xs uppercase tracking-widest p-4 font-body w-12"></th>
-                    </>
-                  )}
+                  <th className="text-muted text-xs uppercase tracking-widest p-4 font-body">Артикул</th>
+                  <th className="text-muted text-xs uppercase tracking-widest p-4 font-body">Название</th>
+                  <th className="text-muted text-xs uppercase tracking-widest p-4 font-body w-12"></th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={4} className="p-4 text-muted text-sm font-mono animate-pulse">Загрузка...</td></tr>
+                  <tr><td colSpan={3} className="p-4 text-muted text-sm font-mono animate-pulse">Загрузка...</td></tr>
                 ) : filtered.length === 0 ? (
-                  <tr><td colSpan={4} className="p-4 text-muted text-sm font-body">Пусто — добавьте позиции через кнопку «Добавить»</td></tr>
+                  <tr><td colSpan={3} className="p-4 text-muted text-sm font-body">Пусто — добавьте позиции через кнопку «Добавить»</td></tr>
                 ) : filtered.map(row => {
-                  if (isPriceLists) {
-                    const pl = row.price_lists
-                    return (
-                      <tr key={row.id} className="table-row">
-                        <td className="p-4 text-cream text-sm font-body">{pl?.name}</td>
-                        <td className="p-4 text-right font-mono text-sm text-gold">{pl?.markup_percent}%</td>
-                        <td className="p-4 text-center">
-                          <span className={`badge text-xs font-body ${pl?.is_active ? 'bg-emerald-400/10 text-emerald-400 border border-emerald-400/20' : 'bg-forest-light/40 text-muted border border-forest-light/40'}`}>
-                            {pl?.is_active ? 'Активен' : 'Неактивен'}
-                          </span>
-                        </td>
-                        <td className="p-4 text-right">
-                          <button onClick={() => removeItem(row.id)} disabled={saving} className="text-muted hover:text-red-400 transition-colors">
-                            <Trash2 size={14} />
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  }
                   const obj = tab === 'sku' ? row.products : row.recipes
                   return (
                     <tr key={row.id} className="table-row">
@@ -253,7 +198,7 @@ export default function AssortmentDetail() {
           <div className="w-80 flex-shrink-0 card">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-display text-sm font-semibold text-cream">
-                Добавить {tab === 'sku' ? 'SKU' : tab === 'recipes' ? 'рецепт' : 'прайслист'}
+                Добавить {tab === 'sku' ? 'SKU' : 'рецепт'}
               </h3>
               <button onClick={() => setShowAdd(false)} className="text-muted hover:text-cream">
                 <X size={16} />
@@ -284,17 +229,8 @@ export default function AssortmentDetail() {
                 >
                   <div className="flex items-center justify-between">
                     <div>
-                      {isPriceLists ? (
-                        <>
-                          <span className="text-cream text-sm font-body">{opt.name}</span>
-                          <div className="text-muted text-xs font-mono mt-0.5">наценка {opt.markup_percent}%</div>
-                        </>
-                      ) : (
-                        <>
-                          <span className="font-mono text-xs text-gold">{opt.article}</span>
-                          <div className="text-cream text-xs font-body leading-tight mt-0.5">{opt.name}</div>
-                        </>
-                      )}
+                      <span className="font-mono text-xs text-gold">{opt.article}</span>
+                      <div className="text-cream text-xs font-body leading-tight mt-0.5">{opt.name}</div>
                     </div>
                     <Plus size={13} className="text-muted group-hover:text-gold transition-colors flex-shrink-0 ml-2" />
                   </div>

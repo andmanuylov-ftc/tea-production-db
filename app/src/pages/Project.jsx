@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import PageHeader from '../components/PageHeader'
-import { FlaskConical, Package, ChevronDown, ChevronRight } from 'lucide-react'
+import { FlaskConical, Package, ChevronDown, ChevronRight, Trash2, Check, X } from 'lucide-react'
 
 const TABS = [
   { key: 'recipe', icon: FlaskConical, label: 'Рецепты' },
@@ -9,23 +9,30 @@ const TABS = [
 ]
 
 export default function Project() {
-  const [tab, setTab]         = useState('recipe')
+  const [tab, setTab]           = useState('recipe')
   const [projects, setProjects] = useState([])
   const [loading, setLoading]   = useState(true)
   const [openId, setOpenId]     = useState(null)
-  const [items, setItems]       = useState({})   // projectId -> items[]
+  const [items, setItems]       = useState({})
   const [itemsLoading, setItemsLoading] = useState({})
+  const [confirmId, setConfirmId] = useState(null)
 
   useEffect(() => {
+    loadProjects()
+  }, [tab])
+
+  async function loadProjects() {
     setLoading(true)
     setOpenId(null)
-    supabase
+    setConfirmId(null)
+    const { data } = await supabase
       .from('projects')
-      .select('id, name, type, created_at, notes')
+      .select('id, name, type, created_at')
       .eq('type', tab)
       .order('created_at', { ascending: false })
-      .then(({ data }) => { setProjects(data ?? []); setLoading(false) })
-  }, [tab])
+    setProjects(data ?? [])
+    setLoading(false)
+  }
 
   async function loadItems(id) {
     if (items[id]) { setOpenId(openId === id ? null : id); return }
@@ -33,11 +40,18 @@ export default function Project() {
     setItemsLoading(prev => ({ ...prev, [id]: true }))
     const { data } = await supabase
       .from('project_items')
-      .select('id, quantity, unit, raw_materials(article, name)')
+      .select('id, quantity, unit, raw_materials(article, name), recipes(article, name)')
       .eq('project_id', id)
       .order('created_at')
     setItems(prev => ({ ...prev, [id]: data ?? [] }))
     setItemsLoading(prev => ({ ...prev, [id]: false }))
+  }
+
+  async function deleteProject(id) {
+    await supabase.from('projects').delete().eq('id', id)
+    setConfirmId(null)
+    setProjects(prev => prev.filter(p => p.id !== id))
+    if (openId === id) setOpenId(null)
   }
 
   function fmtDate(d) {
@@ -48,7 +62,6 @@ export default function Project() {
     <div className="p-8">
       <PageHeader title="Проект" subtitle="Сохранённые конструкции" />
 
-      {/* Tabs */}
       <div className="flex gap-1 mb-6 bg-forest rounded-lg p-1 w-fit">
         {TABS.map(({ key, icon: Icon, label }) => (
           <button
@@ -77,19 +90,53 @@ export default function Project() {
         <div className="flex flex-col gap-3">
           {projects.map(p => (
             <div key={p.id} className="card overflow-hidden">
-              <button
-                onClick={() => openId === p.id ? setOpenId(null) : loadItems(p.id)}
-                className="w-full flex items-center justify-between hover:opacity-80 transition-opacity"
-              >
-                <div className="flex items-center gap-3">
-                  {openId === p.id
-                    ? <ChevronDown size={16} className="text-gold" />
-                    : <ChevronRight size={16} className="text-muted" />}
-                  <span className="text-cream font-body font-medium text-sm">{p.name}</span>
-                </div>
-                <span className="text-muted text-xs font-mono">{fmtDate(p.created_at)}</span>
-              </button>
 
+              {/* Заголовок строки */}
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={() => openId === p.id ? setOpenId(null) : loadItems(p.id)}
+                  className="flex items-center gap-3 flex-1 min-w-0 hover:opacity-80 transition-opacity text-left"
+                >
+                  {openId === p.id
+                    ? <ChevronDown size={16} className="text-gold flex-shrink-0" />
+                    : <ChevronRight size={16} className="text-muted flex-shrink-0" />}
+                  <span className="text-cream font-body font-medium text-sm truncate">{p.name}</span>
+                  <span className="text-muted text-xs font-mono flex-shrink-0 ml-2">{fmtDate(p.created_at)}</span>
+                </button>
+
+                {/* Удалить */}
+                <div className="flex items-center gap-2 ml-4 flex-shrink-0">
+                  {confirmId === p.id ? (
+                    <>
+                      <span className="text-xs text-muted font-body">Удалить?</span>
+                      <button
+                        onClick={() => deleteProject(p.id)}
+                        className="text-red-400 hover:text-red-300 transition-colors"
+                        title="Да, удалить"
+                      >
+                        <Check size={14} />
+                      </button>
+                      <button
+                        onClick={() => setConfirmId(null)}
+                        className="text-muted hover:text-cream transition-colors"
+                        title="Отмена"
+                      >
+                        <X size={14} />
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmId(p.id)}
+                      className="text-muted hover:text-red-400 transition-colors"
+                      title="Удалить проект"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Раскрытый состав */}
               {openId === p.id && (
                 <div className="mt-4 -mx-6">
                   {itemsLoading[p.id] ? (
@@ -100,23 +147,37 @@ export default function Project() {
                         <tr className="border-t border-forest-light/20">
                           <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-6 py-2">Артикул</th>
                           <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-2">Название</th>
+                          <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-2">Тип</th>
                           <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-6 py-2">Количество</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {(items[p.id] ?? []).map(item => (
-                          <tr key={item.id} className="border-t border-forest-light/10 hover:bg-forest-light/5">
-                            <td className="px-6 py-2">
-                              <span className="badge bg-forest-light text-cream border border-forest-light font-mono text-xs">
-                                {item.raw_materials?.article}
-                              </span>
-                            </td>
-                            <td className="px-4 py-2 text-cream font-body text-xs">{item.raw_materials?.name}</td>
-                            <td className="px-6 py-2 text-right font-mono text-xs text-gold">
-                              {item.quantity} {item.unit}
-                            </td>
-                          </tr>
-                        ))}
+                        {(items[p.id] ?? []).map(item => {
+                          const isRecipe = !!item.recipes
+                          const obj = isRecipe ? item.recipes : item.raw_materials
+                          return (
+                            <tr key={item.id} className="border-t border-forest-light/10 hover:bg-forest-light/5">
+                              <td className="px-6 py-2">
+                                <span className="badge bg-forest-light text-cream border border-forest-light font-mono text-xs">
+                                  {obj?.article ?? '—'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-2 text-cream font-body text-xs">{obj?.name ?? '—'}</td>
+                              <td className="px-4 py-2">
+                                <span className={`badge text-xs font-body ${
+                                  isRecipe
+                                    ? 'bg-emerald-400/10 text-emerald-400 border border-emerald-400/20'
+                                    : 'bg-forest-light/40 text-muted border border-forest-light/40'
+                                }`}>
+                                  {isRecipe ? 'Рецепт' : 'Сырьё'}
+                                </span>
+                              </td>
+                              <td className="px-6 py-2 text-right font-mono text-xs text-gold">
+                                {item.quantity} {item.unit}
+                              </td>
+                            </tr>
+                          )
+                        })}
                       </tbody>
                     </table>
                   )}

@@ -12,89 +12,42 @@ export default function PriceLists() {
   const [items, setItems]               = useState({})
   const [loadingItems, setLoadingItems] = useState({})
   const [search, setSearch]             = useState('')
-
-  // Track abort controllers so we can cancel in-flight queries on unmount
-  const abortRefs = useRef({})
-  const mountedRef = useRef(true)
+  const mounted = useRef(true)
 
   useEffect(() => {
-    mountedRef.current = true
-    const controller = new AbortController()
-    abortRefs.current['__init__'] = controller
-
+    mounted.current = true
     supabase
       .from('price_lists')
       .select('id, name, markup_percent')
-      .abortSignal(controller.signal)
       .order('name')
-      .then(({ data, error }) => {
-        if (!mountedRef.current || error) return
+      .then(({ data }) => {
+        if (!mounted.current) return
         setLists(data ?? [])
         setLoading(false)
-        // Auto-open if only one price list, but don't pre-fetch (causes navigation freeze)
-        if (data && data.length === 1) {
-          setOpenId(data[0].id)
-          loadItems(data[0].id)
-        }
+        // НЕ открываем автоматически — пользователь кликает сам
       })
-
-    return () => {
-      mountedRef.current = false
-      // Abort all in-flight requests
-      Object.values(abortRefs.current).forEach(c => c.abort())
-    }
-  }, []) // eslint-disable-line
+    return () => { mounted.current = false }
+  }, [])
 
   async function loadItems(id) {
-    if (items[id]) return
+    if (items[id] || loadingItems[id]) return
+    if (!mounted.current) return
 
-    // Cancel any previous load for same id
-    abortRefs.current[id]?.abort()
-    const controller = new AbortController()
-    abortRefs.current[id] = controller
+    setLoadingItems(prev => ({ ...prev, [id]: true }))
 
-    if (mountedRef.current) setLoadingItems(prev => ({ ...prev, [id]: true }))
+    // Один запрос к product_pricing — всё необходимое уже в нём
+    const { data, error } = await supabase
+      .from('product_pricing')
+      .select('sku_article, product_name, package_size, package_unit, total_sku_cost, final_price')
+      .eq('price_list_id', id)
+      .order('sku_article')
 
-    try {
-      const { data, error } = await supabase
-        .from('price_list_items')
-        .select('id, price, products(id, article, name, package_size, package_unit)')
-        .eq('price_list_id', id)
-        .abortSignal(controller.signal)
+    if (!mounted.current) return
 
-      if (!mountedRef.current || error) return
-
-      const productIds = (data ?? []).map(i => i.products?.id).filter(Boolean)
-      let costMap = {}
-
-      if (productIds.length > 0) {
-        const controller2 = new AbortController()
-        abortRefs.current[id + '_costs'] = controller2
-
-        const { data: costs, error: err2 } = await supabase
-          .from('sku_cost')
-          .select('product_id, total_sku_cost')
-          .in('product_id', productIds)
-          .abortSignal(controller2.signal)
-
-        if (!mountedRef.current || err2) return
-        ;(costs ?? []).forEach(c => { costMap[c.product_id] = c })
-      }
-
-      const enriched = (data ?? [])
-        .map(i => ({ ...i, cost: costMap[i.products?.id] ?? null }))
-        .sort((a, b) => (a.products?.article ?? '').localeCompare(b.products?.article ?? ''))
-
-      if (mountedRef.current) {
-        setItems(prev => ({ ...prev, [id]: enriched }))
-        setLoadingItems(prev => ({ ...prev, [id]: false }))
-      }
-    } catch (e) {
-      // AbortError is expected on unmount — silently ignore
-      if (e?.name !== 'AbortError' && mountedRef.current) {
-        setLoadingItems(prev => ({ ...prev, [id]: false }))
-      }
+    if (!error) {
+      setItems(prev => ({ ...prev, [id]: data ?? [] }))
     }
+    setLoadingItems(prev => ({ ...prev, [id]: false }))
   }
 
   function toggleList(id) {
@@ -112,13 +65,13 @@ export default function PriceLists() {
     if (!search.trim()) return listItems
     const q = search.toLowerCase()
     return listItems.filter(i =>
-      (i.products?.article ?? '').toLowerCase().includes(q) ||
-      (i.products?.name ?? '').toLowerCase().includes(q)
+      (i.sku_article ?? '').toLowerCase().includes(q) ||
+      (i.product_name ?? '').toLowerCase().includes(q)
     )
   }
 
   function highlight(text) {
-    if (!search.trim()) return text
+    if (!search.trim() || !text) return text
     const q = search.trim()
     const idx = text.toLowerCase().indexOf(q.toLowerCase())
     if (idx === -1) return text
@@ -155,7 +108,7 @@ export default function PriceLists() {
           {lists.map(l => (
             <div key={l.id} className="card overflow-hidden">
 
-              {/* Заголовок */}
+              {/* Заголовок — кликать для раскрытия */}
               <button
                 onClick={() => toggleList(l.id)}
                 className="w-full flex items-center justify-between py-1 hover:opacity-80 transition-opacity"
@@ -170,7 +123,7 @@ export default function PriceLists() {
                   </span>
                 </div>
                 <div className="text-muted text-xs font-mono">
-                  {items[l.id] ? `${items[l.id].length} позиций` : ''}
+                  {items[l.id] ? `${items[l.id].length} позиций` : 'нажмите для загрузки'}
                 </div>
               </button>
 
@@ -219,31 +172,31 @@ export default function PriceLists() {
                             {rows.length === 0 ? (
                               <tr>
                                 <td colSpan={7} className="px-6 py-8 text-center text-muted text-sm font-body">
-                                  Ничего не найдено по запросу «{search}»
+                                  {search ? `Ничего не найдено по запросу «${search}»` : 'Нет данных'}
                                 </td>
                               </tr>
                             ) : rows.map((item, idx) => {
-                              const priceNoVat = Number(item.price) || 0
+                              const priceNoVat = Number(item.final_price) || 0
                               const priceVat   = priceNoVat * (1 + VAT)
                               return (
                                 <tr
-                                  key={item.id}
+                                  key={item.sku_article}
                                   className={`border-t border-forest-light/10 hover:bg-forest-light/5 transition-colors ${idx % 2 !== 0 ? 'bg-forest-light/5' : ''}`}
                                 >
                                   <td className="px-6 py-2.5 text-muted font-mono text-xs text-right">{idx + 1}</td>
                                   <td className="px-4 py-2.5">
                                     <span className="badge bg-gold/10 text-gold border border-gold/20 font-mono text-xs px-2 py-0.5 rounded whitespace-nowrap">
-                                      {highlight(item.products?.article ?? '—')}
+                                      {highlight(item.sku_article ?? '—')}
                                     </span>
                                   </td>
                                   <td className="px-4 py-2.5 text-cream font-body">
-                                    {highlight(item.products?.name ?? '—')}
+                                    {highlight(item.product_name ?? '—')}
                                   </td>
                                   <td className="px-4 py-2.5 text-muted font-mono text-right whitespace-nowrap">
-                                    {item.products?.package_size ? `${item.products.package_size} ${item.products.package_unit}` : '—'}
+                                    {item.package_size ? `${item.package_size} ${item.package_unit}` : '—'}
                                   </td>
                                   <td className="px-4 py-2.5 text-cream font-mono text-right">
-                                    {fmt(item.cost?.total_sku_cost)}
+                                    {fmt(item.total_sku_cost)}
                                   </td>
                                   <td className="px-4 py-2.5 text-gold font-mono text-right font-medium">
                                     {fmt(priceNoVat)}

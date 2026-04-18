@@ -4,14 +4,16 @@ import {
   FlaskConical,
   Package,
   FileSpreadsheet,
-  Leaf
+  Leaf,
+  Layers
 } from 'lucide-react'
 
 const nav = [
-  { to: '/dashboard',  label: 'Дашборд',    icon: LayoutDashboard },
-  { to: '/recipes',    label: 'Рецепты',     icon: FlaskConical },
-  { to: '/skus',       label: 'SKU',         icon: Package },
-  { to: '/pricelists', label: 'Прайслисты',  icon: FileSpreadsheet },
+  { to: '/assortments', label: 'Ассортименты', icon: Layers },
+  { to: '/dashboard',   label: 'Дашборд',      icon: LayoutDashboard },
+  { to: '/recipes',     label: 'Рецепты',       icon: FlaskConical },
+  { to: '/skus',        label: 'SKU',           icon: Package },
+  { to: '/pricelists',  label: 'Прайслисты',    icon: FileSpreadsheet },
 ]
 
 export default function Layout({ children }) {
@@ -54,7 +56,7 @@ export default function Layout({ children }) {
 
         {/* Footer */}
         <div className="px-6 py-4 border-t border-forest-light/40">
-          <div className="text-muted text-xs font-mono">v0.1.0</div>
+          <div className="text-muted text-xs font-mono">v0.2.0</div>
         </div>
       </aside>
 

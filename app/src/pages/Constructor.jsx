@@ -4,59 +4,86 @@ import { supabase } from '../lib/supabase'
 import PageHeader from '../components/PageHeader'
 import { Search, Plus, Trash2, FlaskConical, Package, X } from 'lucide-react'
 
+// item shape:
+//   { key, kind: 'material'|'recipe', ref_id, article, name, unit, quantity }
+
 export default function Constructor() {
   const navigate = useNavigate()
-  const [type, setType]           = useState('recipe')  // 'recipe' | 'sku'
-  const [name, setName]           = useState('')
-  const [items, setItems]         = useState([])         // {material_id, article, name, unit, quantity}
-  const [allMats, setAllMats]     = useState([])
-  const [search, setSearch]       = useState('')
-  const [saving, setSaving]       = useState(false)
-  const [error, setError]         = useState('')
+  const [type, setType]       = useState('recipe')   // 'recipe' | 'sku'
+  const [name, setName]       = useState('')
+  const [items, setItems]     = useState([])
+  const [saving, setSaving]   = useState(false)
+  const [error, setError]     = useState('')
+
+  // search panel state
+  const [panelTab, setPanelTab] = useState('material') // 'material' | 'recipe' (SKU mode only)
+  const [search, setSearch]     = useState('')
+  const [allMats, setAllMats]   = useState([])
+  const [allRecs, setAllRecs]   = useState([])
   const mounted = useRef(true)
 
   useEffect(() => {
     mounted.current = true
-    supabase
-      .from('raw_materials')
-      .select('id, article, name, unit')
-      .order('article')
-      .then(({ data }) => { if (mounted.current) setAllMats(data ?? []) })
+    Promise.all([
+      supabase.from('raw_materials').select('id, article, name, unit').order('article'),
+      supabase.from('recipes').select('id, article, name').order('article'),
+    ]).then(([mats, recs]) => {
+      if (!mounted.current) return
+      setAllMats(mats.data ?? [])
+      setAllRecs(recs.data ?? [])
+    })
     return () => { mounted.current = false }
   }, [])
 
+  // When switching type reset items and panel
+  function switchType(t) {
+    setType(t)
+    setItems([])
+    setSearch('')
+    setPanelTab(t === 'sku' ? 'recipe' : 'material')
+    setError('')
+  }
+
+  const addedKeys = new Set(items.map(i => i.key))
+
   function addMaterial(mat) {
-    if (items.find(i => i.material_id === mat.id)) return
+    const key = `mat_${mat.id}`
+    if (addedKeys.has(key)) return
     setItems(prev => [...prev, {
-      material_id: mat.id,
-      article:     mat.article,
-      name:        mat.name,
-      unit:        mat.unit ?? 'г',
-      quantity:    '',
+      key, kind: 'material', ref_id: mat.id,
+      article: mat.article, name: mat.name,
+      unit: mat.unit ?? 'г', quantity: '',
     }])
     setSearch('')
   }
 
-  function removeItem(material_id) {
-    setItems(prev => prev.filter(i => i.material_id !== material_id))
+  function addRecipe(rec) {
+    const key = `rec_${rec.id}`
+    if (addedKeys.has(key)) return
+    setItems(prev => [...prev, {
+      key, kind: 'recipe', ref_id: rec.id,
+      article: rec.article, name: rec.name,
+      unit: 'кг', quantity: '',
+    }])
+    setSearch('')
   }
 
-  function setQty(material_id, val) {
-    setItems(prev => prev.map(i =>
-      i.material_id === material_id ? { ...i, quantity: val } : i
-    ))
+  function removeItem(key) {
+    setItems(prev => prev.filter(i => i.key !== key))
   }
 
-  function setUnit(material_id, val) {
-    setItems(prev => prev.map(i =>
-      i.material_id === material_id ? { ...i, unit: val } : i
-    ))
+  function setQty(key, val) {
+    setItems(prev => prev.map(i => i.key === key ? { ...i, quantity: val } : i))
+  }
+
+  function setUnit(key, val) {
+    setItems(prev => prev.map(i => i.key === key ? { ...i, unit: val } : i))
   }
 
   async function handleSave() {
     setError('')
     if (!name.trim()) { setError('Введите название'); return }
-    if (items.length === 0) { setError('Добавьте хотя бы одно сырьё'); return }
+    if (items.length === 0) { setError('Добавьте хотя бы одну позицию'); return }
 
     setSaving(true)
     const { data: proj, error: projErr } = await supabase
@@ -69,7 +96,8 @@ export default function Constructor() {
 
     const rows = items.map(i => ({
       project_id:  proj.id,
-      material_id: i.material_id,
+      material_id: i.kind === 'material' ? i.ref_id : null,
+      recipe_id:   i.kind === 'recipe'   ? i.ref_id : null,
       quantity:    parseFloat(String(i.quantity).replace(',', '.')) || 0,
       unit:        i.unit,
     }))
@@ -79,41 +107,46 @@ export default function Constructor() {
     navigate('/project')
   }
 
-  const addedIds = new Set(items.map(i => i.material_id))
-  const searchResults = allMats.filter(m => {
-    if (addedIds.has(m.id)) return false
+  // Search results for current panel tab
+  const searchResults = (() => {
+    if (!search.trim()) return []
     const q = search.toLowerCase()
-    return m.article.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)
-  })
+    if (panelTab === 'material') {
+      return allMats
+        .filter(m => !addedKeys.has(`mat_${m.id}`))
+        .filter(m => m.article.toLowerCase().includes(q) || m.name.toLowerCase().includes(q))
+    } else {
+      return allRecs
+        .filter(r => !addedKeys.has(`rec_${r.id}`))
+        .filter(r => r.article.toLowerCase().includes(q) || r.name.toLowerCase().includes(q))
+    }
+  })()
+
+  const isSku = type === 'sku'
 
   return (
     <div className="p-8">
       <PageHeader title="Конструктор" subtitle="Создание нового рецепта или SKU" />
 
-      {/* Выбор типа */}
+      {/* Тип */}
       <div className="flex gap-3 mb-6">
-        <button
-          onClick={() => setType('recipe')}
-          className={`flex items-center gap-2 px-6 py-3 rounded-xl border text-sm font-body transition-all ${
-            type === 'recipe'
-              ? 'bg-gold/15 text-gold border-gold/30'
-              : 'text-muted border-forest-light/40 hover:text-cream hover:border-forest-light'
-          }`}
-        >
-          <FlaskConical size={16} />
-          Рецепт
-        </button>
-        <button
-          onClick={() => setType('sku')}
-          className={`flex items-center gap-2 px-6 py-3 rounded-xl border text-sm font-body transition-all ${
-            type === 'sku'
-              ? 'bg-gold/15 text-gold border-gold/30'
-              : 'text-muted border-forest-light/40 hover:text-cream hover:border-forest-light'
-          }`}
-        >
-          <Package size={16} />
-          SKU
-        </button>
+        {[
+          { key: 'recipe', icon: FlaskConical, label: 'Рецепт' },
+          { key: 'sku',    icon: Package,      label: 'SKU' },
+        ].map(({ key, icon: Icon, label }) => (
+          <button
+            key={key}
+            onClick={() => switchType(key)}
+            className={`flex items-center gap-2 px-6 py-3 rounded-xl border text-sm font-body transition-all ${
+              type === key
+                ? 'bg-gold/15 text-gold border-gold/30'
+                : 'text-muted border-forest-light/40 hover:text-cream hover:border-forest-light'
+            }`}
+          >
+            <Icon size={16} />
+            {label}
+          </button>
+        ))}
       </div>
 
       {/* Название */}
@@ -122,7 +155,7 @@ export default function Constructor() {
         <input
           value={name}
           onChange={e => setName(e.target.value)}
-          placeholder={type === 'recipe' ? 'Например: Ассам TGFOP' : 'Например: Ассам TGFOP-ЗИП100'}
+          placeholder={isSku ? 'Например: Ассам TGFOP-ЗИП100' : 'Например: Ассам TGFOP'}
           className="w-full bg-forest border border-forest-light/40 rounded-lg px-4 py-2.5
                      text-cream text-sm font-body placeholder-muted/60
                      focus:outline-none focus:border-gold/50"
@@ -138,6 +171,7 @@ export default function Constructor() {
                 <tr className="text-left">
                   <th className="text-muted text-xs uppercase tracking-widest p-4 font-body">Артикул</th>
                   <th className="text-muted text-xs uppercase tracking-widest p-4 font-body">Название</th>
+                  {isSku && <th className="text-muted text-xs uppercase tracking-widest p-4 font-body">Тип</th>}
                   <th className="text-muted text-xs uppercase tracking-widest p-4 font-body w-28 text-right">Количество</th>
                   <th className="text-muted text-xs uppercase tracking-widest p-4 font-body w-20">Ед.</th>
                   <th className="w-10"></th>
@@ -146,25 +180,39 @@ export default function Constructor() {
               <tbody>
                 {items.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="p-8 text-center text-muted text-sm font-body">
-                      Найдите сырьё в поиске справа и нажмите <span className="text-gold">+</span>
+                    <td colSpan={isSku ? 6 : 5} className="p-8 text-center text-muted text-sm font-body">
+                      {isSku
+                        ? <>Сначала добавьте <span className="text-gold">рецепт</span> чая, затем упаковочные <span className="text-gold">материалы</span></>
+                        : <>Найдите сырьё в поиске справа и нажмите <span className="text-gold">+</span></>
+                      }
                     </td>
                   </tr>
                 ) : items.map(item => (
-                  <tr key={item.material_id} className="table-row">
+                  <tr key={item.key} className="table-row">
                     <td className="p-4">
                       <span className="badge bg-forest-light text-cream border border-forest-light font-mono text-xs">
                         {item.article}
                       </span>
                     </td>
                     <td className="p-4 text-cream text-sm font-body">{item.name}</td>
+                    {isSku && (
+                      <td className="p-4">
+                        <span className={`badge text-xs font-body ${
+                          item.kind === 'recipe'
+                            ? 'bg-emerald-400/10 text-emerald-400 border border-emerald-400/20'
+                            : 'bg-forest-light/40 text-muted border border-forest-light/40'
+                        }`}>
+                          {item.kind === 'recipe' ? 'Рецепт' : 'Сырьё'}
+                        </span>
+                      </td>
+                    )}
                     <td className="p-4 text-right">
                       <input
                         type="number"
                         min="0"
                         step="0.01"
                         value={item.quantity}
-                        onChange={e => setQty(item.material_id, e.target.value)}
+                        onChange={e => setQty(item.key, e.target.value)}
                         className="w-24 bg-forest border border-forest-light/40 rounded-lg px-2 py-1
                                    text-cream text-sm font-mono text-right
                                    focus:outline-none focus:border-gold/50"
@@ -173,7 +221,7 @@ export default function Constructor() {
                     <td className="p-4">
                       <select
                         value={item.unit}
-                        onChange={e => setUnit(item.material_id, e.target.value)}
+                        onChange={e => setUnit(item.key, e.target.value)}
                         className="bg-forest border border-forest-light/40 rounded-lg px-2 py-1
                                    text-cream text-sm font-mono focus:outline-none focus:border-gold/50
                                    appearance-none cursor-pointer w-16"
@@ -185,10 +233,7 @@ export default function Constructor() {
                       </select>
                     </td>
                     <td className="p-4">
-                      <button
-                        onClick={() => removeItem(item.material_id)}
-                        className="text-muted hover:text-red-400 transition-colors"
-                      >
+                      <button onClick={() => removeItem(item.key)} className="text-muted hover:text-red-400 transition-colors">
                         <Trash2 size={14} />
                       </button>
                     </td>
@@ -198,7 +243,6 @@ export default function Constructor() {
             </table>
           </div>
 
-          {/* Ошибка и сохранение */}
           {error && <p className="text-red-400 text-sm font-body mb-3">{error}</p>}
           <button
             onClick={handleSave}
@@ -210,9 +254,41 @@ export default function Constructor() {
           </button>
         </div>
 
-        {/* Поиск сырья */}
+        {/* Правая панель поиска */}
         <div className="w-80 flex-shrink-0 card">
-          <h3 className="font-display text-sm font-semibold text-cream mb-3">Добавить сырьё</h3>
+
+          {/* Вкладки панели (только в режиме SKU) */}
+          {isSku && (
+            <div className="flex gap-1 mb-4 bg-forest rounded-lg p-1">
+              <button
+                onClick={() => { setPanelTab('recipe'); setSearch('') }}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-body transition-all ${
+                  panelTab === 'recipe'
+                    ? 'bg-emerald-400/15 text-emerald-400 border border-emerald-400/20'
+                    : 'text-muted hover:text-cream'
+                }`}
+              >
+                <FlaskConical size={12} /> Рецепты
+              </button>
+              <button
+                onClick={() => { setPanelTab('material'); setSearch('') }}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-body transition-all ${
+                  panelTab === 'material'
+                    ? 'bg-gold/15 text-gold border border-gold/20'
+                    : 'text-muted hover:text-cream'
+                }`}
+              >
+                <Package size={12} /> Сырьё
+              </button>
+            </div>
+          )}
+
+          <h3 className="font-display text-sm font-semibold text-cream mb-3">
+            {isSku
+              ? (panelTab === 'recipe' ? 'Добавить рецепт чая' : 'Добавить сырьё/упаковку')
+              : 'Добавить сырьё'}
+          </h3>
+
           <div className="relative mb-3">
             <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
             <input
@@ -230,21 +306,21 @@ export default function Constructor() {
             )}
           </div>
 
-          <div className="space-y-0.5 max-h-[60vh] overflow-y-auto">
+          <div className="space-y-0.5 max-h-[55vh] overflow-y-auto">
             {!search.trim() ? (
               <p className="text-muted text-xs font-body py-2">Введите артикул или название для поиска</p>
             ) : searchResults.length === 0 ? (
               <p className="text-muted text-xs font-body py-2">Ничего не найдено</p>
-            ) : searchResults.map(mat => (
+            ) : searchResults.map(item => (
               <button
-                key={mat.id}
-                onClick={() => addMaterial(mat)}
+                key={item.id}
+                onClick={() => panelTab === 'recipe' ? addRecipe(item) : addMaterial(item)}
                 className="w-full flex items-center justify-between px-3 py-2 rounded-lg
                            hover:bg-forest-light/40 transition-colors group"
               >
                 <div className="text-left min-w-0 flex-1 mr-2">
-                  <div className="font-mono text-xs text-gold">{mat.article}</div>
-                  <div className="text-cream text-xs font-body leading-tight truncate">{mat.name}</div>
+                  <div className="font-mono text-xs text-gold">{item.article}</div>
+                  <div className="text-cream text-xs font-body leading-tight truncate">{item.name}</div>
                 </div>
                 <Plus size={14} className="text-muted group-hover:text-gold transition-colors flex-shrink-0" />
               </button>

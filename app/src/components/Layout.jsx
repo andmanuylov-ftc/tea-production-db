@@ -3,7 +3,6 @@ import {
   LayoutDashboard,
   FlaskConical,
   Package,
-  FileSpreadsheet,
   Leaf,
   Layers
 } from 'lucide-react'
@@ -13,7 +12,6 @@ const nav = [
   { to: '/dashboard',   label: 'Дашборд',      icon: LayoutDashboard },
   { to: '/recipes',     label: 'Рецепты',       icon: FlaskConical },
   { to: '/skus',        label: 'SKU',           icon: Package },
-  { to: '/pricelists',  label: 'Прайслисты',    icon: FileSpreadsheet },
 ]
 
 export default function Layout({ children }) {

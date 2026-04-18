@@ -9,8 +9,8 @@ const META = {
 }
 
 const TABS = [
-  { key: 'sku',     icon: Package,      label: 'SKU' },
   { key: 'recipes', icon: FlaskConical, label: 'Рецепты' },
+  { key: 'sku',     icon: Package,      label: 'SKU' },
 ]
 
 export default function AssortmentDetail() {
@@ -19,7 +19,7 @@ export default function AssortmentDetail() {
   const m = META[code] ?? { label: code, color: 'text-gold', bg: 'bg-gold/10', border: 'border-gold/30' }
 
   const [assortmentId, setAssortmentId] = useState(null)
-  const [tab, setTab] = useState('sku')
+  const [tab, setTab] = useState('recipes')
   const [items, setItems] = useState([])
   const [allOptions, setAllOptions] = useState([])
   const [search, setSearch] = useState('')
@@ -105,7 +105,6 @@ export default function AssortmentDetail() {
 
   return (
     <div className="p-8">
-      {/* Header */}
       <div className="flex items-center gap-3 mb-2">
         <button onClick={() => navigate('/assortments')} className="text-muted hover:text-cream transition-colors">
           <ArrowLeft size={18} />
@@ -115,7 +114,6 @@ export default function AssortmentDetail() {
       <h1 className="font-display text-2xl font-semibold text-cream mb-1">{m.label}</h1>
       <p className="text-muted text-sm font-body mb-6">{items.length} позиций в текущей вкладке</p>
 
-      {/* Tabs */}
       <div className="flex gap-1 mb-6 bg-forest rounded-lg p-1 w-fit">
         {TABS.map(({ key, icon: Icon, label }) => (
           <button
@@ -134,7 +132,6 @@ export default function AssortmentDetail() {
       </div>
 
       <div className="flex gap-6">
-        {/* Main list */}
         <div className="flex-1">
           <div className="flex items-center gap-3 mb-4">
             <div className="relative flex-1 max-w-xs">
@@ -193,7 +190,6 @@ export default function AssortmentDetail() {
           </div>
         </div>
 
-        {/* Add panel */}
         {showAdd && (
           <div className="w-80 flex-shrink-0 card">
             <div className="flex items-center justify-between mb-4">

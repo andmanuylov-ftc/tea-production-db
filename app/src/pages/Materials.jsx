@@ -24,7 +24,6 @@ export default function Materials() {
     return () => { mounted.current = false }
   }, [])
 
-  // Закрывать меню при клике вне его
   useEffect(() => {
     function handleClick(e) {
       if (menuRef.current && !menuRef.current.contains(e.target)) {
@@ -118,17 +117,17 @@ export default function Materials() {
       </div>
 
       <div className="flex gap-6">
-        {/* Таблица */}
-        <div className="flex-1 card p-0 overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-forest">
-              <tr className="text-left">
-                <th className="text-muted text-xs uppercase tracking-widest p-4 font-body">Артикул</th>
-                <th className="text-muted text-xs uppercase tracking-widest p-4 font-body">Название</th>
-                <th className="text-muted text-xs uppercase tracking-widest p-4 font-body">Ед.</th>
-                <th className="text-muted text-xs uppercase tracking-widest p-4 font-body text-right">Цена без НДС, руб.</th>
-                <th className="text-muted text-xs uppercase tracking-widest p-4 font-body text-right">Дата цены</th>
-                <th className="w-12"></th>
+        {/* Таблица — overflow-visible чтобы дропдаун не обрезался */}
+        <div className="flex-1 card p-0">
+          <table className="w-full border-separate border-spacing-0">
+            <thead>
+              <tr>
+                <th className="bg-forest text-muted text-xs uppercase tracking-widest p-4 font-body text-left rounded-tl-[var(--border-radius-lg)]">Артикул</th>
+                <th className="bg-forest text-muted text-xs uppercase tracking-widest p-4 font-body text-left">Название</th>
+                <th className="bg-forest text-muted text-xs uppercase tracking-widest p-4 font-body text-left">Ед.</th>
+                <th className="bg-forest text-muted text-xs uppercase tracking-widest p-4 font-body text-right">Цена без НДС, руб.</th>
+                <th className="bg-forest text-muted text-xs uppercase tracking-widest p-4 font-body text-right">Дата цены</th>
+                <th className="bg-forest w-12 rounded-tr-[var(--border-radius-lg)]"></th>
               </tr>
             </thead>
             <tbody>
@@ -138,18 +137,18 @@ export default function Materials() {
                 <tr><td colSpan={6} className="p-8 text-muted text-sm text-center font-body">Ничего не найдено</td></tr>
               ) : filtered.map(r => (
                 <tr key={r.id} className={`table-row ${editRow?.id === r.id ? 'bg-gold/5' : ''}`}>
-                  <td className="p-4">
+                  <td className="p-4 border-t border-forest-light/20">
                     <span className="badge bg-forest-light text-cream border border-forest-light font-mono text-xs">
                       {r.article}
                     </span>
                   </td>
-                  <td className="p-4 text-cream text-sm font-body">{r.name}</td>
-                  <td className="p-4 text-muted text-sm font-mono">{r.unit}</td>
-                  <td className="p-4 text-right font-mono text-sm text-gold">{fmt(r.current_price)}</td>
-                  <td className="p-4 text-right font-mono text-xs text-muted">{fmtDate(r.price_date)}</td>
+                  <td className="p-4 border-t border-forest-light/20 text-cream text-sm font-body">{r.name}</td>
+                  <td className="p-4 border-t border-forest-light/20 text-muted text-sm font-mono">{r.unit}</td>
+                  <td className="p-4 border-t border-forest-light/20 text-right font-mono text-sm text-gold">{fmt(r.current_price)}</td>
+                  <td className="p-4 border-t border-forest-light/20 text-right font-mono text-xs text-muted">{fmtDate(r.price_date)}</td>
 
-                  {/* Три точки + выпадающее меню */}
-                  <td className="p-2 text-right" ref={openMenuId === r.id ? menuRef : null}>
+                  {/* ⋯ меню */}
+                  <td className="p-2 border-t border-forest-light/20 text-right" ref={openMenuId === r.id ? menuRef : null}>
                     <div className="relative inline-block">
                       <button
                         onClick={() => setOpenMenuId(openMenuId === r.id ? null : r.id)}
@@ -173,16 +172,12 @@ export default function Materials() {
                             <div className="px-4 py-2.5 border-t border-forest-light/30">
                               <p className="text-xs text-muted font-body mb-2">Удалить позицию?</p>
                               <div className="flex gap-2">
-                                <button
-                                  onClick={() => deleteRow(r.id)}
-                                  className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 transition-colors"
-                                >
+                                <button onClick={() => deleteRow(r.id)}
+                                  className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 transition-colors">
                                   <Check size={12} /> Да
                                 </button>
-                                <button
-                                  onClick={() => { setConfirmId(null); setOpenMenuId(null) }}
-                                  className="flex items-center gap-1 text-xs text-muted hover:text-cream transition-colors"
-                                >
+                                <button onClick={() => { setConfirmId(null); setOpenMenuId(null) }}
+                                  className="flex items-center gap-1 text-xs text-muted hover:text-cream transition-colors">
                                   <X size={12} /> Нет
                                 </button>
                               </div>

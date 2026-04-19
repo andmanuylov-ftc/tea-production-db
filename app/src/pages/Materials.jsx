@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import PageHeader from '../components/PageHeader'
-import { Search, Pencil, Trash2, X, Check, Clock, MoreHorizontal } from 'lucide-react'
+import { Search, Pencil, Trash2, X, Check, Clock, MoreHorizontal, Upload } from 'lucide-react'
 
 export default function Materials() {
+  const navigate = useNavigate()
   const [rows, setRows]               = useState([])
   const [loading, setLoading]         = useState(true)
   const [search, setSearch]           = useState('')
@@ -102,7 +104,20 @@ export default function Materials() {
 
   return (
     <div className="p-8">
-      <PageHeader title="Сырьё и материалы" subtitle={`${rows.length} позиций в базе`} />
+      <PageHeader
+        title="Сырьё и материалы"
+        subtitle={`${rows.length} позиций в базе`}
+        action={
+          <button
+            onClick={() => navigate('/materials/import')}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gold/15 text-gold
+                       border border-gold/20 text-sm font-body hover:bg-gold/25 transition-all"
+          >
+            <Upload size={14} />
+            Импорт из Excel
+          </button>
+        }
+      />
 
       <div className="relative mb-6 w-80">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
@@ -117,7 +132,7 @@ export default function Materials() {
       </div>
 
       <div className="flex gap-6">
-        {/* Таблица — overflow-visible чтобы дропдаун не обрезался */}
+        {/* Таблица */}
         <div className="flex-1 card p-0">
           <table className="w-full border-separate border-spacing-0">
             <thead>
@@ -147,7 +162,6 @@ export default function Materials() {
                   <td className="p-4 border-t border-forest-light/20 text-right font-mono text-sm text-gold">{fmt(r.current_price)}</td>
                   <td className="p-4 border-t border-forest-light/20 text-right font-mono text-xs text-muted">{fmtDate(r.price_date)}</td>
 
-                  {/* ⋯ меню */}
                   <td className="p-2 border-t border-forest-light/20 text-right" ref={openMenuId === r.id ? menuRef : null}>
                     <div className="relative inline-block">
                       <button

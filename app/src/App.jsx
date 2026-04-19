@@ -6,6 +6,7 @@ import SKUs from './pages/SKUs'
 import Assortments from './pages/Assortments'
 import AssortmentDetail from './pages/AssortmentDetail'
 import Materials from './pages/Materials'
+import MaterialsImport from './pages/MaterialsImport'
 import Constructor from './pages/Constructor'
 import Project from './pages/Project'
 
@@ -20,6 +21,7 @@ export default function App() {
         <Route path="/recipes" element={<Recipes />} />
         <Route path="/skus" element={<SKUs />} />
         <Route path="/materials" element={<Materials />} />
+        <Route path="/materials/import" element={<MaterialsImport />} />
         <Route path="/constructor" element={<Constructor />} />
         <Route path="/project" element={<Project />} />
       </Routes>

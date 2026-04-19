@@ -21,8 +21,7 @@ function fmt(val) {
   return Number(val).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-// Пустое состояние формы продвижения
-const emptyPromote = { article: '', name: '', packageSize: '', packageUnit: 'г', saving: false, error: '', done: false }
+const emptyPromote = { article: '', name: '', packageSize: '', saving: false, error: '', done: false }
 
 export default function Project() {
   const [tab, setTab]       = useState('recipe')
@@ -41,9 +40,7 @@ export default function Project() {
   const [editName, setEditName]       = useState('')
   const [editItems, setEditItems]     = useState([])
   const [saving, setSaving]           = useState(false)
-
-  // promote: projectId -> state
-  const [promote, setPromote] = useState({})
+  const [promote, setPromote]         = useState({})
 
   useEffect(() => { loadProjects() }, [tab])
 
@@ -68,9 +65,8 @@ export default function Project() {
     setLoading(false)
   }
 
-  async function loadItems(id) {
-    if (items[id]) { setOpenId(openId === id ? null : id); return }
-    setOpenId(id)
+  // Загружает позиции и цены, НЕ переключает аккордеон
+  async function fetchItems(id) {
     setItemsLoading(prev => ({ ...prev, [id]: true }))
 
     const { data: its } = await supabase
@@ -108,6 +104,13 @@ export default function Project() {
 
     setCosts(prev => ({ ...prev, [id]: { map: costMap, total } }))
     setItemsLoading(prev => ({ ...prev, [id]: false }))
+  }
+
+  // Клик по заголовку проекта — ПЕРЕКЛЮЧАЕТ аккордеон
+  async function toggleProject(id) {
+    if (openId === id) { setOpenId(null); return }
+    setOpenId(id)
+    if (!items[id]) await fetchItems(id)
   }
 
   async function deleteProject(id) {
@@ -161,13 +164,15 @@ export default function Project() {
   function setEditQty(id, val) { setEditItems(prev => prev.map(i => i.id === id ? { ...i, quantity: val } : i)) }
   function setEditUnit(id, val) { setEditItems(prev => prev.map(i => i.id === id ? { ...i, unit: val } : i)) }
 
-  // --- Продвижение в рецепты / SKU ---
-  function openPromote(projectId) {
-    setPromote(prev => ({ ...prev, [projectId]: { ...emptyPromote } }))
+  // Открыть форму продвижения — НЕ сворачивает аккордеон
+  async function openPromote(p) {
+    setOpenId(p.id)                         // убедиться что открыт
+    if (!items[p.id]) await fetchItems(p.id) // загрузить если не загружено
+    setPromote(prev => ({ ...prev, [p.id]: { ...emptyPromote } }))
   }
 
-  function updatePromote(projectId, field, value) {
-    setPromote(prev => ({ ...prev, [projectId]: { ...prev[projectId], [field]: value } }))
+  function updatePromote(pid, field, value) {
+    setPromote(prev => ({ ...prev, [pid]: { ...prev[pid], [field]: value } }))
   }
 
   async function savePromoteRecipe(p) {
@@ -175,10 +180,8 @@ export default function Project() {
     if (!form.article.trim() || !form.name.trim()) {
       updatePromote(p.id, 'error', 'Заполните артикул и название'); return
     }
-    updatePromote(p.id, 'saving', true)
-    updatePromote(p.id, 'error', '')
+    updatePromote(p.id, 'saving', true); updatePromote(p.id, 'error', '')
 
-    // 1. Создаём рецепт
     const { data: rec, error: recErr } = await supabase
       .from('recipes')
       .insert({ article: form.article.trim(), name: form.name.trim(), output_quantity: 1, output_unit: 'кг' })
@@ -186,30 +189,22 @@ export default function Project() {
 
     if (recErr || !rec) { updatePromote(p.id, 'error', 'Ошибка создания рецепта'); updatePromote(p.id, 'saving', false); return }
 
-    // 2. Добавляем ингредиенты (только материалы, конвертируем г→кг)
     const its = items[p.id] ?? []
-    const ingredients = its
-      .filter(i => i.raw_materials)
-      .map(i => ({
-        recipe_id:   rec.id,
-        material_id: i.raw_materials.id,
-        quantity:    i.unit === 'г' ? parseFloat(i.quantity) / 1000 : parseFloat(i.quantity),
-        unit:        i.unit === 'г' ? 'кг' : i.unit,
-      }))
-
+    const ingredients = its.filter(i => i.raw_materials).map(i => ({
+      recipe_id:   rec.id,
+      material_id: i.raw_materials.id,
+      // конвертируем всё в кг
+      quantity: i.unit === 'г' ? parseFloat(i.quantity) / 1000 : parseFloat(i.quantity),
+      unit:     'кг',
+    }))
     if (ingredients.length) await supabase.from('recipe_ingredients').insert(ingredients)
 
-    // 3. Привязываем к проекту
     await supabase.from('projects').update({
-      linked_id:      rec.id,
-      linked_article: form.article.trim(),
-      linked_name:    form.name.trim(),
+      linked_id: rec.id, linked_article: form.article.trim(), linked_name: form.name.trim()
     }).eq('id', p.id)
 
     setProjects(prev => prev.map(pr => pr.id === p.id
-      ? { ...pr, linked_id: rec.id, linked_article: form.article.trim(), linked_name: form.name.trim() }
-      : pr
-    ))
+      ? { ...pr, linked_id: rec.id, linked_article: form.article.trim(), linked_name: form.name.trim() } : pr))
     setPromote(prev => ({ ...prev, [p.id]: { ...prev[p.id], saving: false, done: true } }))
   }
 
@@ -218,47 +213,36 @@ export default function Project() {
     if (!form.article.trim() || !form.name.trim()) {
       updatePromote(p.id, 'error', 'Заполните артикул и название'); return
     }
-    updatePromote(p.id, 'saving', true)
-    updatePromote(p.id, 'error', '')
+    updatePromote(p.id, 'saving', true); updatePromote(p.id, 'error', '')
 
     const pkgSize = parseFloat(form.packageSize) || null
 
-    // 1. Создаём продукт
     const { data: prod, error: prodErr } = await supabase
       .from('products')
       .insert({
-        article:      form.article.trim(),
-        name:         form.name.trim(),
-        package_size: pkgSize,
-        package_unit: form.packageUnit || 'г',
+        article: form.article.trim(), name: form.name.trim(),
+        package_size: pkgSize, package_unit: 'шт',  // SKU всегда в штуках
       })
       .select('id').single()
 
     if (prodErr || !prod) { updatePromote(p.id, 'error', 'Ошибка создания SKU'); updatePromote(p.id, 'saving', false); return }
 
-    // 2. Добавляем компоненты
     const its = items[p.id] ?? []
     const components = its.map(i => ({
       product_id:  prod.id,
-      recipe_id:   i.recipes   ? i.recipes.id        : null,
+      recipe_id:   i.recipes      ? i.recipes.id       : null,
       material_id: i.raw_materials ? i.raw_materials.id : null,
       quantity:    parseFloat(i.quantity) || 0,
       unit:        i.unit,
     }))
-
     if (components.length) await supabase.from('sku_recipe_components').insert(components)
 
-    // 3. Привязываем к проекту
     await supabase.from('projects').update({
-      linked_id:      prod.id,
-      linked_article: form.article.trim(),
-      linked_name:    form.name.trim(),
+      linked_id: prod.id, linked_article: form.article.trim(), linked_name: form.name.trim()
     }).eq('id', p.id)
 
     setProjects(prev => prev.map(pr => pr.id === p.id
-      ? { ...pr, linked_id: prod.id, linked_article: form.article.trim(), linked_name: form.name.trim() }
-      : pr
-    ))
+      ? { ...pr, linked_id: prod.id, linked_article: form.article.trim(), linked_name: form.name.trim() } : pr))
     setPromote(prev => ({ ...prev, [p.id]: { ...prev[p.id], saving: false, done: true } }))
   }
 
@@ -298,10 +282,9 @@ export default function Project() {
               return (
                 <div key={p.id} className={`card overflow-hidden transition-all ${editProject?.id === p.id ? 'border-gold/30' : ''}`}>
 
-                  {/* Заголовок */}
                   <div className="flex items-center justify-between">
                     <button
-                      onClick={() => openId === p.id ? setOpenId(null) : loadItems(p.id)}
+                      onClick={() => toggleProject(p.id)}
                       className="flex items-center gap-3 flex-1 min-w-0 hover:opacity-80 transition-opacity text-left"
                     >
                       {openId === p.id
@@ -309,8 +292,6 @@ export default function Project() {
                         : <ChevronRight size={16} className="text-muted flex-shrink-0" />}
                       <span className="text-cream font-body font-medium text-sm truncate">{p.name}</span>
                       <span className="text-muted text-xs font-mono flex-shrink-0 ml-2">{fmtDate(p.created_at)}</span>
-
-                      {/* Бейдж — уже добавлен */}
                       {p.linked_article && (
                         <span className="flex items-center gap-1 ml-2 badge bg-emerald-400/10 text-emerald-400 border border-emerald-400/20 text-xs font-mono flex-shrink-0">
                           <Link size={10} /> {p.linked_article}
@@ -349,7 +330,6 @@ export default function Project() {
                     </div>
                   </div>
 
-                  {/* Состав */}
                   {openId === p.id && (
                     <div className="mt-4 -mx-6">
                       {itemsLoading[p.id] ? (
@@ -397,7 +377,6 @@ export default function Project() {
                             </div>
                           )}
 
-                          {/* Кнопка / форма продвижения */}
                           <div className="mx-6 pb-2">
                             {p.linked_article ? (
                               <div className="flex items-center gap-2 py-2 px-3 rounded-lg bg-emerald-400/5 border border-emerald-400/20">
@@ -408,7 +387,7 @@ export default function Project() {
                               </div>
                             ) : !prom ? (
                               <button
-                                onClick={() => { loadItems(p.id); openPromote(p.id) }}
+                                onClick={() => openPromote(p)}
                                 className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gold/20 bg-gold/10 text-gold text-xs font-body hover:bg-gold/20 transition-all"
                               >
                                 <PlusCircle size={13} />
@@ -424,55 +403,42 @@ export default function Project() {
                                 <p className="text-muted text-xs font-body uppercase tracking-widest mb-3">
                                   Добавить в {isSku ? 'SKU' : 'рецепты'}
                                 </p>
-
                                 <div className="space-y-3">
                                   <div>
                                     <label className="text-muted text-xs font-body block mb-1">Артикул</label>
-                                    <input
-                                      value={prom.article}
+                                    <input value={prom.article}
                                       onChange={e => updatePromote(p.id, 'article', e.target.value)}
                                       placeholder={isSku ? 'Например: 4201-ЗИП100' : 'Например: 4201'}
-                                      className="w-full bg-forest border border-forest-light/40 rounded-lg px-3 py-1.5
-                                                 text-cream text-sm font-mono focus:outline-none focus:border-gold/50"
-                                    />
+                                      className="w-full bg-forest border border-forest-light/40 rounded-lg px-3 py-1.5 text-cream text-sm font-mono focus:outline-none focus:border-gold/50" />
                                   </div>
                                   <div>
                                     <label className="text-muted text-xs font-body block mb-1">Точное название</label>
-                                    <input
-                                      value={prom.name}
+                                    <input value={prom.name}
                                       onChange={e => updatePromote(p.id, 'name', e.target.value)}
                                       placeholder={isSku ? 'Например: Ассам TGFOP, 100 гр' : 'Например: Ассам TGFOP'}
-                                      className="w-full bg-forest border border-forest-light/40 rounded-lg px-3 py-1.5
-                                                 text-cream text-sm font-body focus:outline-none focus:border-gold/50"
-                                    />
+                                      className="w-full bg-forest border border-forest-light/40 rounded-lg px-3 py-1.5 text-cream text-sm font-body focus:outline-none focus:border-gold/50" />
                                   </div>
 
+                                  {/* Рецепт: выход всегда 1 кг */}
+                                  {!isSku && (
+                                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-forest-light/20 border border-forest-light/30">
+                                      <span className="text-muted text-xs font-body">Выход рецепта:</span>
+                                      <span className="text-cream text-xs font-mono">1 кг</span>
+                                    </div>
+                                  )}
+
+                                  {/* SKU: фасовка в штуках */}
                                   {isSku && (
-                                    <div className="flex gap-2">
-                                      <div className="flex-1">
-                                        <label className="text-muted text-xs font-body block mb-1">Фасовка</label>
-                                        <input
-                                          type="number"
-                                          value={prom.packageSize}
+                                    <div>
+                                      <label className="text-muted text-xs font-body block mb-1">
+                                        Фасовка, шт
+                                      </label>
+                                      <div className="flex items-center gap-2">
+                                        <input type="number" value={prom.packageSize}
                                           onChange={e => updatePromote(p.id, 'packageSize', e.target.value)}
-                                          placeholder="100"
-                                          className="w-full bg-forest border border-forest-light/40 rounded-lg px-3 py-1.5
-                                                     text-cream text-sm font-mono focus:outline-none focus:border-gold/50"
-                                        />
-                                      </div>
-                                      <div>
-                                        <label className="text-muted text-xs font-body block mb-1">Ед.</label>
-                                        <select
-                                          value={prom.packageUnit}
-                                          onChange={e => updatePromote(p.id, 'packageUnit', e.target.value)}
-                                          className="bg-forest border border-forest-light/40 rounded-lg px-2 py-1.5
-                                                     text-cream text-sm font-mono focus:outline-none focus:border-gold/50
-                                                     appearance-none cursor-pointer w-16"
-                                        >
-                                          <option value="г">г</option>
-                                          <option value="кг">кг</option>
-                                          <option value="шт">шт</option>
-                                        </select>
+                                          placeholder="1"
+                                          className="flex-1 bg-forest border border-forest-light/40 rounded-lg px-3 py-1.5 text-cream text-sm font-mono focus:outline-none focus:border-gold/50" />
+                                        <span className="text-muted text-sm font-mono">шт</span>
                                       </div>
                                     </div>
                                   )}
@@ -483,8 +449,7 @@ export default function Project() {
                                     <button
                                       onClick={() => isSku ? savePromoteSku(p) : savePromoteRecipe(p)}
                                       disabled={prom.saving}
-                                      className="flex-1 py-1.5 rounded-lg bg-gold/15 text-gold border border-gold/20
-                                                 text-xs font-body hover:bg-gold/25 transition-all disabled:opacity-50"
+                                      className="flex-1 py-1.5 rounded-lg bg-gold/15 text-gold border border-gold/20 text-xs font-body hover:bg-gold/25 transition-all disabled:opacity-50"
                                     >
                                       {prom.saving ? 'Сохранение...' : 'Сохранить'}
                                     </button>
@@ -508,7 +473,6 @@ export default function Project() {
             })}
           </div>
 
-          {/* Панель редактирования */}
           {editProject && (
             <div className="w-80 flex-shrink-0 card">
               <div className="flex items-center justify-between mb-5">

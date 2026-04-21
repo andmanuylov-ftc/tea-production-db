@@ -9,6 +9,7 @@ import Materials from './pages/Materials'
 import MaterialsImport from './pages/MaterialsImport'
 import Constructor from './pages/Constructor'
 import Project from './pages/Project'
+import PriceLists from './pages/PriceLists'
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
         <Route path="/materials/import" element={<MaterialsImport />} />
         <Route path="/constructor" element={<Constructor />} />
         <Route path="/project" element={<Project />} />
+        <Route path="/pricelists" element={<PriceLists />} />
       </Routes>
     </Layout>
   )

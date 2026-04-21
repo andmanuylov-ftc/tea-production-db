@@ -6,7 +6,8 @@ import {
   Leaf,
   Layers,
   Wrench,
-  FolderOpen
+  FolderOpen,
+  FileText
 } from 'lucide-react'
 
 const nav = [
@@ -17,6 +18,7 @@ const nav = [
   { to: '/materials',   label: 'Сырьё',         icon: Leaf },
   { to: '/constructor', label: 'Конструктор',   icon: Wrench },
   { to: '/project',     label: 'Проект',        icon: FolderOpen },
+  { to: '/pricelists',  label: 'Прайс лист',    icon: FileText },
 ]
 
 export default function Layout({ children }) {

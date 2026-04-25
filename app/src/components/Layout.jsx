@@ -31,7 +31,7 @@ export default function Layout({ children }) {
               <Leaf size={16} className="text-gold" />
             </div>
             <div>
-              <div className="font-display font-semibold text-cream text-sm leading-tight">FTC</div>
+              <div className="font-display font-semibold text-cream text-sm leading-tight">ПЧК/ADDIS</div>
               <div className="text-muted text-xs">Производство</div>
             </div>
           </div>

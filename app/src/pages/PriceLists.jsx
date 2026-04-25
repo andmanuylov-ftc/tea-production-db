@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 import PageHeader from '../components/PageHeader'
-import { ChevronDown, ChevronRight, FileText, Search, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Download, FileText, Search, X } from 'lucide-react'
 
 const VAT = 0.22
 
@@ -24,7 +25,6 @@ export default function PriceLists() {
         if (!mounted.current) return
         setLists(data ?? [])
         setLoading(false)
-        // НЕ открываем автоматически — пользователь кликает сам
       })
     return () => { mounted.current = false }
   }, [])
@@ -35,7 +35,6 @@ export default function PriceLists() {
 
     setLoadingItems(prev => ({ ...prev, [id]: true }))
 
-    // Один запрос к product_pricing — всё необходимое уже в нём
     const { data, error } = await supabase
       .from('product_pricing')
       .select('sku_article, product_name, package_size, package_unit, total_sku_cost, final_price')
@@ -84,6 +83,54 @@ export default function PriceLists() {
     )
   }
 
+  function exportToXls(list) {
+    const rows = items[list.id] ?? []
+    const today = new Date().toLocaleDateString('ru-RU')
+
+    const sheetData = [
+      // Заголовок
+      [`${list.name} (+${list.markup_percent}%)`],
+      [`Дата выгрузки: ${today}`],
+      [],
+      // Шапка таблицы
+      ['№', 'Артикул', 'Наименование', 'Фасовка', 'Себест., руб', 'Цена без НДС, руб', 'Цена с НДС 22%, руб'],
+    ]
+
+    rows.forEach((item, idx) => {
+      const priceNoVat = Number(item.final_price) || 0
+      const priceVat   = Math.round(priceNoVat * (1 + VAT) * 100) / 100
+      const fasovka    = item.package_size ? `${item.package_size} ${item.package_unit}` : '—'
+      sheetData.push([
+        idx + 1,
+        item.sku_article ?? '—',
+        item.product_name ?? '—',
+        fasovka,
+        Math.round(Number(item.total_sku_cost) * 100) / 100,
+        Math.round(priceNoVat * 100) / 100,
+        priceVat,
+      ])
+    })
+
+    const ws = XLSX.utils.aoa_to_sheet(sheetData)
+
+    // Ширина колонок
+    ws['!cols'] = [
+      { wch: 5 },   // №
+      { wch: 16 },  // Артикул
+      { wch: 40 },  // Наименование
+      { wch: 12 },  // Фасовка
+      { wch: 16 },  // Себест.
+      { wch: 20 },  // Цена без НДС
+      { wch: 22 },  // Цена с НДС
+    ]
+
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Прайс-лист')
+
+    const filename = `${list.name} +${list.markup_percent}% ${today.replace(/\./g, '-')}.xlsx`
+    XLSX.writeFile(wb, filename)
+  }
+
   return (
     <div className="p-8">
       <PageHeader
@@ -130,22 +177,38 @@ export default function PriceLists() {
               {/* Поиск + таблица */}
               {openId === l.id && (
                 <div className="mt-4">
-                  <div className="relative mb-4 max-w-sm">
-                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
-                    <input
-                      type="text"
-                      value={search}
-                      onChange={e => setSearch(e.target.value)}
-                      placeholder="Поиск по артикулу или названию…"
-                      className="w-full bg-forest-dark border border-forest-light/40 rounded-lg pl-9 pr-8 py-2
-                                 text-cream text-sm font-body focus:outline-none focus:border-gold/50 placeholder:text-muted"
-                    />
-                    {search && (
+                  <div className="flex items-center gap-3 mb-4">
+                    {/* Поиск */}
+                    <div className="relative flex-1 max-w-sm">
+                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
+                      <input
+                        type="text"
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                        placeholder="Поиск по артикулу или названию…"
+                        className="w-full bg-forest-dark border border-forest-light/40 rounded-lg pl-9 pr-8 py-2
+                                   text-cream text-sm font-body focus:outline-none focus:border-gold/50 placeholder:text-muted"
+                      />
+                      {search && (
+                        <button
+                          onClick={() => setSearch('')}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-cream transition-colors"
+                        >
+                          <X size={13} />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Кнопка выгрузки */}
+                    {items[l.id] && items[l.id].length > 0 && (
                       <button
-                        onClick={() => setSearch('')}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-cream transition-colors"
+                        onClick={() => exportToXls(l)}
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gold/30
+                                   bg-gold/10 text-gold text-xs font-body font-medium
+                                   hover:bg-gold/20 hover:border-gold/50 transition-colors whitespace-nowrap"
                       >
-                        <X size={13} />
+                        <Download size={14} />
+                        Выгрузить прайс-лист
                       </button>
                     )}
                   </div>

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import PageHeader from '../components/PageHeader'
-import { Search, Filter, X, Upload, ImageOff } from 'lucide-react'
+import { Search, Filter, X, Upload, ImageOff, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
 
 export default function SKUs() {
   const [rows, setRows]             = useState([])
@@ -11,10 +11,18 @@ export default function SKUs() {
   const [typeFilter, setTypeFilter] = useState('all')
   const [selected, setSelected]     = useState(null)
   const [components, setComponents] = useState([])
-  const [costs, setCosts]           = useState({}) // article -> cost_per_unit
+  const [costs, setCosts]           = useState({})
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [uploading, setUploading]   = useState(false)
   const fileRef = useRef(null)
+
+  // menu / edit / delete
+  const [openMenu,  setOpenMenu]  = useState(null)   // sku_article
+  const [editSku,   setEditSku]   = useState(null)   // row object
+  const [editForm,  setEditForm]  = useState({})
+  const [deleteSku, setDeleteSku] = useState(null)   // row object
+  const [saving,    setSaving]    = useState(false)
+  const [deleting,  setDeleting]  = useState(false)
 
   useEffect(() => {
     Promise.all([
@@ -28,15 +36,17 @@ export default function SKUs() {
         .not('code', 'like', '_')
         .not('code', 'like', '__')
         .order('code'),
-      supabase.from('products').select('id, type_id, photo_url'),
+      supabase.from('products').select('id, type_id, photo_url, article, name'),
     ]).then(([skus, typeRes, products]) => {
       const prodMap = Object.fromEntries(
-        (products.data ?? []).map(p => [p.id, { type_id: p.type_id, photo_url: p.photo_url }])
+        (products.data ?? []).map(p => [p.id, { type_id: p.type_id, photo_url: p.photo_url, article: p.article, name: p.name }])
       )
       const enriched = (skus.data ?? []).map(s => ({
         ...s,
         type_id:   prodMap[s.product_id]?.type_id,
         photo_url: prodMap[s.product_id]?.photo_url,
+        _article:  prodMap[s.product_id]?.article,
+        _name:     prodMap[s.product_id]?.name,
       }))
       setRows(enriched)
       setTypes(typeRes.data ?? [])
@@ -51,7 +61,6 @@ export default function SKUs() {
     setSelected(row)
     setLoadingDetail(true)
 
-    // Состав SKU
     const { data: comps } = await supabase
       .from('sku_recipe_components')
       .select('quantity, unit, recipes(article, name), raw_materials(id, article, name)')
@@ -60,9 +69,8 @@ export default function SKUs() {
     const items = comps ?? []
     setComponents(items)
 
-    // Цены: рецепты из recipe_cost, материалы из material_prices
-    const recipeArticles  = items.filter(c => c.recipes).map(c => c.recipes.article)
-    const materialIds     = items.filter(c => c.raw_materials).map(c => c.raw_materials.id)
+    const recipeArticles = items.filter(c => c.recipes).map(c => c.recipes.article)
+    const materialIds    = items.filter(c => c.raw_materials).map(c => c.raw_materials.id)
 
     const [recipeCosts, matPrices] = await Promise.all([
       recipeArticles.length
@@ -80,7 +88,6 @@ export default function SKUs() {
     for (const r of (recipeCosts.data ?? [])) costMap[r.recipe_article] = Number(r.total_cost)
     for (const m of (matPrices.data ?? []))   costMap[m.material_id]    = Number(m.price_per_unit)
     setCosts(costMap)
-
     setLoadingDetail(false)
   }
 
@@ -111,6 +118,53 @@ export default function SKUs() {
     const updated = { ...selected, photo_url: null }
     setSelected(updated)
     setRows(prev => prev.map(r => r.product_id === selected.product_id ? { ...r, photo_url: null } : r))
+  }
+
+  // ── Edit ──
+  function startEdit(row, e) {
+    e.stopPropagation()
+    setOpenMenu(null)
+    setEditSku(row)
+    setEditForm({ article: row._article ?? row.sku_article, name: row._name ?? row.product_name, type_id: row.type_id ?? '' })
+  }
+
+  async function saveEdit() {
+    if (!editSku) return
+    setSaving(true)
+    const { error } = await supabase.from('products').update({
+      article: editForm.article.trim(),
+      name:    editForm.name.trim(),
+      type_id: editForm.type_id || null,
+    }).eq('id', editSku.product_id)
+    if (!error) {
+      setRows(prev => prev.map(r =>
+        r.product_id === editSku.product_id
+          ? { ...r, sku_article: editForm.article.trim(), product_name: editForm.name.trim(), type_id: editForm.type_id, _article: editForm.article.trim(), _name: editForm.name.trim() }
+          : r
+      ))
+      if (selected?.product_id === editSku.product_id)
+        setSelected(prev => ({ ...prev, sku_article: editForm.article.trim(), product_name: editForm.name.trim() }))
+      setEditSku(null)
+    }
+    setSaving(false)
+  }
+
+  // ── Delete ──
+  function startDelete(row, e) {
+    e.stopPropagation()
+    setOpenMenu(null)
+    setDeleteSku(row)
+  }
+
+  async function confirmDelete() {
+    if (!deleteSku) return
+    setDeleting(true)
+    await supabase.from('sku_recipe_components').delete().eq('product_id', deleteSku.product_id)
+    await supabase.from('products').delete().eq('id', deleteSku.product_id)
+    setRows(prev => prev.filter(r => r.product_id !== deleteSku.product_id))
+    if (selected?.product_id === deleteSku.product_id) { setSelected(null); setComponents([]); setCosts({}) }
+    setDeleteSku(null)
+    setDeleting(false)
   }
 
   const leafTypes = types.filter(t =>
@@ -172,6 +226,9 @@ export default function SKUs() {
         </div>
       </div>
 
+      {/* Click-outside overlay for menu */}
+      {openMenu && <div className="fixed inset-0 z-40" onClick={() => setOpenMenu(null)} />}
+
       <div className="flex gap-6">
         {/* Table */}
         <div className="flex-1 card p-0 overflow-hidden">
@@ -184,13 +241,14 @@ export default function SKUs() {
                 <th className="text-muted text-xs uppercase tracking-widest p-4 font-body text-right">Купаж</th>
                 <th className="text-muted text-xs uppercase tracking-widest p-4 font-body text-right">Упаковка</th>
                 <th className="text-muted text-xs uppercase tracking-widest p-4 font-body text-right">Итого, руб</th>
+                <th className="w-10"></th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={6} className="p-4 text-muted text-sm font-mono animate-pulse">Загрузка...</td></tr>
+                <tr><td colSpan={7} className="p-4 text-muted text-sm font-mono animate-pulse">Загрузка...</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={6} className="p-8 text-muted text-sm text-center font-body">Ничего не найдено</td></tr>
+                <tr><td colSpan={7} className="p-8 text-muted text-sm text-center font-body">Ничего не найдено</td></tr>
               ) : filtered.map(r => (
                 <tr
                   key={r.sku_article}
@@ -214,6 +272,30 @@ export default function SKUs() {
                   <td className="p-4 text-right font-mono text-sm text-muted">{Number(r.blend_cost).toFixed(2)}</td>
                   <td className="p-4 text-right font-mono text-sm text-muted">{Number(r.packaging_cost).toFixed(2)}</td>
                   <td className="p-4 text-right font-mono text-sm font-semibold text-gold">{Number(r.total_sku_cost).toFixed(2)}</td>
+                  <td className="pr-3 text-right relative" onClick={e => e.stopPropagation()}>
+                    <button
+                      onClick={() => setOpenMenu(openMenu === r.sku_article ? null : r.sku_article)}
+                      className="text-muted hover:text-cream p-1.5 rounded hover:bg-forest-light/30 transition-colors"
+                    >
+                      <MoreHorizontal size={15} />
+                    </button>
+                    {openMenu === r.sku_article && (
+                      <div className="absolute right-3 top-9 z-50 bg-forest-dark border border-forest-light/50 rounded-lg shadow-2xl py-1 w-40">
+                        <button
+                          onClick={e => startEdit(r, e)}
+                          className="w-full text-left px-4 py-2 text-sm text-cream hover:bg-forest-light/30 font-body flex items-center gap-2"
+                        >
+                          <Pencil size={13} /> Редактировать
+                        </button>
+                        <button
+                          onClick={e => startDelete(r, e)}
+                          className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-red-900/20 font-body flex items-center gap-2"
+                        >
+                          <Trash2 size={13} /> Удалить
+                        </button>
+                      </div>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -274,7 +356,6 @@ export default function SKUs() {
               <div className="text-muted text-sm font-mono animate-pulse">Загрузка...</div>
             ) : (
               <>
-                {/* Купаж */}
                 {blendItems.length > 0 && (
                   <div className="mb-4">
                     <div className="flex justify-between items-center mb-2">
@@ -303,7 +384,6 @@ export default function SKUs() {
                   </div>
                 )}
 
-                {/* Упаковка */}
                 {packItems.length > 0 && (
                   <div>
                     <div className="flex justify-between items-center mb-2">
@@ -332,7 +412,6 @@ export default function SKUs() {
                   </div>
                 )}
 
-                {/* Итого */}
                 <div className="mt-4 pt-4 border-t border-forest-light/40 flex justify-between items-center">
                   <span className="text-muted text-xs font-body uppercase tracking-widest">Себестоимость</span>
                   <span className="text-gold font-mono font-semibold">{Number(selected.total_sku_cost).toFixed(2)} руб</span>
@@ -342,6 +421,90 @@ export default function SKUs() {
           </div>
         )}
       </div>
+
+      {/* ── Edit Modal ── */}
+      {editSku && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-forest-dark/80 backdrop-blur-sm">
+          <div className="bg-forest border border-forest-light/40 rounded-xl p-6 w-[420px] shadow-2xl">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-display text-lg text-cream">Редактировать SKU</h3>
+              <button onClick={() => setEditSku(null)} className="text-muted hover:text-cream"><X size={16} /></button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-muted text-xs uppercase tracking-widest font-body block mb-1.5">Артикул</label>
+                <input
+                  value={editForm.article}
+                  onChange={e => setEditForm(f => ({ ...f, article: e.target.value }))}
+                  className="w-full bg-forest-dark border border-forest-light/40 rounded-lg px-3 py-2
+                             text-cream text-sm font-mono focus:outline-none focus:border-gold/50"
+                />
+              </div>
+              <div>
+                <label className="text-muted text-xs uppercase tracking-widest font-body block mb-1.5">Название</label>
+                <input
+                  value={editForm.name}
+                  onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
+                  className="w-full bg-forest-dark border border-forest-light/40 rounded-lg px-3 py-2
+                             text-cream text-sm font-body focus:outline-none focus:border-gold/50"
+                />
+              </div>
+              <div>
+                <label className="text-muted text-xs uppercase tracking-widest font-body block mb-1.5">Категория</label>
+                <select
+                  value={editForm.type_id}
+                  onChange={e => setEditForm(f => ({ ...f, type_id: e.target.value }))}
+                  className="w-full bg-forest-dark border border-forest-light/40 rounded-lg px-3 py-2
+                             text-cream text-sm font-body focus:outline-none focus:border-gold/50 appearance-none"
+                >
+                  <option value="">— не указана —</option>
+                  {types.map(t => <option key={t.id} value={t.id}>{t.code} — {t.name}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-3 justify-end mt-6">
+              <button onClick={() => setEditSku(null)} className="px-4 py-2 text-sm text-muted hover:text-cream font-body transition-colors">Отмена</button>
+              <button
+                onClick={saveEdit}
+                disabled={saving}
+                className="btn-primary text-sm disabled:opacity-50"
+              >
+                {saving ? 'Сохранение...' : 'Сохранить'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete Confirm Modal ── */}
+      {deleteSku && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-forest-dark/80 backdrop-blur-sm">
+          <div className="bg-forest border border-forest-light/40 rounded-xl p-6 w-96 shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-display text-lg text-cream">Удалить SKU?</h3>
+              <button onClick={() => setDeleteSku(null)} className="text-muted hover:text-cream"><X size={16} /></button>
+            </div>
+            <p className="text-muted text-sm font-body mb-1">
+              Будет удалён SKU и все его компоненты:
+            </p>
+            <div className="bg-forest-dark rounded-lg p-3 mb-5">
+              <span className="font-mono text-gold text-sm">{deleteSku.sku_article}</span>
+              <span className="text-cream text-sm font-body ml-2">{deleteSku.product_name}</span>
+            </div>
+            <p className="text-red-400 text-xs font-body mb-5">Это действие необратимо.</p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setDeleteSku(null)} className="px-4 py-2 text-sm text-muted hover:text-cream font-body transition-colors">Отмена</button>
+              <button
+                onClick={confirmDelete}
+                disabled={deleting}
+                className="bg-red-800 hover:bg-red-700 text-red-100 text-sm px-4 py-2 rounded-lg font-body transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                <Trash2 size={13} />{deleting ? 'Удаление...' : 'Удалить'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

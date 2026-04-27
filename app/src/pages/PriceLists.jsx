@@ -133,7 +133,7 @@ export default function PriceLists() {
       [`${list.name} (+${list.markup_percent}%)`],
       [`Дата выгрузки: ${today}`],
       [],
-      ['№', 'Артикул', 'Наименование', 'Фасовка', 'Себест., руб', 'Цена без НДС, руб', 'Цена с НДС 22%, руб'],
+      ['№', 'Артикул', 'Наименование', 'Фасовка', 'Цена без НДС, руб', 'Цена с НДС 22%, руб'],
     ]
 
     exportRows.forEach((item, idx) => {
@@ -145,7 +145,6 @@ export default function PriceLists() {
         item.sku_article ?? '—',
         item.product_name ?? '—',
         fasovka,
-        Math.round(Number(item.total_sku_cost) * 100) / 100,
         Math.round(priceNoVat * 100) / 100,
         priceVat,
       ])
@@ -157,7 +156,6 @@ export default function PriceLists() {
       { wch: 16 },
       { wch: 40 },
       { wch: 12 },
-      { wch: 16 },
       { wch: 20 },
       { wch: 22 },
     ]
@@ -286,7 +284,6 @@ export default function PriceLists() {
                           <table className="w-full text-sm">
                             <thead>
                               <tr className="border-t border-forest-light/20">
-                                {/* Чекбокс "выделить все" */}
                                 <th className="px-6 py-3 w-10">
                                   {visibleRows.length > 0 && (
                                     <Checkbox
@@ -300,7 +297,6 @@ export default function PriceLists() {
                                 <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-3">Артикул</th>
                                 <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-3">Наименование</th>
                                 <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-4 py-3">Фасовка</th>
-                                <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-4 py-3">Себест., руб</th>
                                 <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-4 py-3 text-gold">Цена без НДС, руб</th>
                                 <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-6 py-3 text-gold/70">Цена с НДС 22%, руб</th>
                               </tr>
@@ -308,7 +304,7 @@ export default function PriceLists() {
                             <tbody>
                               {visibleRows.length === 0 ? (
                                 <tr>
-                                  <td colSpan={8} className="px-6 py-8 text-center text-muted text-sm font-body">
+                                  <td colSpan={7} className="px-6 py-8 text-center text-muted text-sm font-body">
                                     {search ? `Ничего не найдено по запросу «${search}»` : 'Нет данных'}
                                   </td>
                                 </tr>
@@ -345,9 +341,6 @@ export default function PriceLists() {
                                     </td>
                                     <td className="px-4 py-2.5 text-muted font-mono text-right whitespace-nowrap">
                                       {item.package_size ? `${item.package_size} ${item.package_unit}` : '—'}
-                                    </td>
-                                    <td className="px-4 py-2.5 text-cream font-mono text-right">
-                                      {fmt(item.total_sku_cost)}
                                     </td>
                                     <td className="px-4 py-2.5 text-gold font-mono text-right font-medium">
                                       {fmt(priceNoVat)}

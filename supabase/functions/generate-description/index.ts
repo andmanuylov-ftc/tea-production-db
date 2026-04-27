@@ -13,7 +13,8 @@ serve(async (req) => {
   }
 
   try {
-    const { sku_article, product_name, ingredients } = await req.json()
+    const body = await req.json()
+    const { sku_article, product_name, ingredients } = body
 
     if (!product_name) {
       return new Response(JSON.stringify({ error: 'product_name required' }), {
@@ -22,8 +23,15 @@ serve(async (req) => {
       })
     }
 
+    if (!ANTHROPIC_API_KEY) {
+      return new Response(JSON.stringify({ error: 'ANTHROPIC_API_KEY not set' }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
     const ingredientList = (ingredients ?? [])
-      .map((i: { name: string; quantity: number }) => `${i.name} (${(i.quantity * 1000).toFixed(0)} г/кг)`)
+      .map((i: any) => `${i.name} (${(Number(i.quantity) * 1000).toFixed(0)} г/кг)`)
       .join(', ')
 
     const prompt = `Ты копирайтер чайной компании ПЧК/ADDIS. Напиши продающее описание для прайс-листа.
@@ -56,15 +64,16 @@ serve(async (req) => {
       }),
     })
 
+    const responseText = await response.text()
+
     if (!response.ok) {
-      const err = await response.text()
-      return new Response(JSON.stringify({ error: err }), {
+      return new Response(JSON.stringify({ error: `Anthropic error ${response.status}: ${responseText}` }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
 
-    const data = await response.json()
+    const data = JSON.parse(responseText)
     const description = data.content?.[0]?.text?.trim() ?? ''
 
     return new Response(JSON.stringify({ description }), {

@@ -6,7 +6,6 @@ import { ChevronDown, ChevronRight, Download, FileText, Search, X } from 'lucide
 
 const VAT = 0.22
 
-// Порядок категорий в таблице
 const CATEGORY_SORT = {
   28: 10, 37: 11, 38: 12,
   29: 20, 40: 21, 41: 22,
@@ -24,6 +23,15 @@ function getCategorySort(typeId) {
 
 function isPetProduct(name) {
   return (name ?? '').toUpperCase().includes('ПЭТ')
+}
+
+// Форматирование фасовки: кг → гр., г → гр., шт остаётся шт
+function formatFasovka(size, unit) {
+  if (!size) return '—'
+  const n = Number(size)
+  if (unit === 'кг') return `${Math.round(n * 1000)} гр.`
+  if (unit === 'г')  return `${n % 1 === 0 ? n : n} гр.`
+  return `${size} ${unit}`
 }
 
 function Checkbox({ checked, indeterminate, onChange, className = '' }) {
@@ -149,7 +157,6 @@ export default function PriceLists() {
     )
   }
 
-  // Группировка: ПЭТ определяется по слову «ПЭТ» в названии — всегда в отдельный раздел в конце
   function groupRows(rows) {
     const main = {}
     const pet  = []
@@ -187,7 +194,6 @@ export default function PriceLists() {
     return groups
   }
 
-  // ─── Выделение ──────────────────────────────────────────────────────────
   function getSet(listId) { return selected[listId] ?? new Set() }
 
   function toggleRow(listId, key) {
@@ -224,7 +230,6 @@ export default function PriceLists() {
     setSelected(prev => ({ ...prev, [listId]: new Set() }))
   }
 
-  // ─── Экспорт ─────────────────────────────────────────────────────────────
   function exportToXls(list, allRows) {
     const today  = new Date().toLocaleDateString('ru-RU')
     const selSet = getSet(list.id)
@@ -249,12 +254,11 @@ export default function PriceLists() {
       group.rows.forEach(item => {
         const priceNoVat = Number(item.final_price) || 0
         const priceVat   = Math.round(priceNoVat * (1 + VAT) * 100) / 100
-        const fasovka    = item.package_size ? `${item.package_size} ${item.package_unit}` : '—'
         sheetData.push([
           globalIdx++,
           item.sku_article ?? '—',
           item.product_name ?? '—',
-          fasovka,
+          formatFasovka(item.package_size, item.package_unit),
           Math.round(priceNoVat * 100) / 100,
           priceVat,
         ])
@@ -273,7 +277,6 @@ export default function PriceLists() {
     XLSX.writeFile(wb, filename)
   }
 
-  // ─── Рендер ──────────────────────────────────────────────────────────────
   return (
     <div className="p-8">
       <PageHeader
@@ -405,7 +408,6 @@ export default function PriceLists() {
 
                               return (
                                 <>
-                                  {/* Заголовок раздела */}
                                   <tr key={`group-${group.typeId}`}
                                     className={`border-t-2 ${group.isPet ? 'border-amber-500/40 bg-amber-900/10' : 'border-forest-light/30 bg-forest-light/5'}`}>
                                     <td className="px-6 py-2.5">
@@ -427,7 +429,6 @@ export default function PriceLists() {
                                     </td>
                                   </tr>
 
-                                  {/* Строки */}
                                   {group.rows.map((item, idx) => {
                                     const isChecked  = selSet.has(item.sku_article)
                                     const priceNoVat = Number(item.final_price) || 0
@@ -461,7 +462,7 @@ export default function PriceLists() {
                                           {highlight(item.product_name ?? '—')}
                                         </td>
                                         <td className="px-4 py-2.5 text-muted font-mono text-right whitespace-nowrap">
-                                          {item.package_size ? `${item.package_size} ${item.package_unit}` : '—'}
+                                          {formatFasovka(item.package_size, item.package_unit)}
                                         </td>
                                         <td className="px-4 py-2.5 text-gold font-mono text-right font-medium">
                                           {fmt(priceNoVat)}

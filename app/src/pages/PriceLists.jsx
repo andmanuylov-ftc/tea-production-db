@@ -5,23 +5,25 @@ import PageHeader from '../components/PageHeader'
 import { ChevronDown, ChevronRight, Download, FileText, Search, X } from 'lucide-react'
 
 const VAT = 0.22
-const PET_TYPE_ID = 27
 
 // Порядок категорий в таблице
 const CATEGORY_SORT = {
-  28: 10, 37: 11, 38: 12,       // Черные чаи
-  29: 20, 40: 21, 41: 22,       // Зеленые чаи
-  30: 30, 42: 31, 43: 32, 44: 33, // Улуны
-  31: 40,                        // Пуэры
-  32: 50,                        // Красные чаи
-  39: 55,                        // Моносорта зелёный
-  33: 60, 34: 61, 45: 62, 46: 63, // Травяные
-  35: 70, 47: 71, 48: 72,        // Фруктово-ягодные
-  27: 999,                       // ПЭТ — всегда последним
+  28: 10, 37: 11, 38: 12,
+  29: 20, 40: 21, 41: 22,
+  30: 30, 42: 31, 43: 32, 44: 33,
+  31: 40,
+  32: 50,
+  39: 55,
+  33: 60, 34: 61, 45: 62, 46: 63,
+  35: 70, 47: 71, 48: 72,
 }
 
 function getCategorySort(typeId) {
   return CATEGORY_SORT[typeId] ?? 500
+}
+
+function isPetProduct(name) {
+  return (name ?? '').toUpperCase().includes('ПЭТ')
 }
 
 function Checkbox({ checked, indeterminate, onChange, className = '' }) {
@@ -46,12 +48,11 @@ export default function PriceLists() {
   const [openId, setOpenId]             = useState(null)
   const [items, setItems]               = useState({})
   const [loadingItems, setLoadingItems] = useState({})
-  const [typeNames, setTypeNames]       = useState({})   // { id: name }
+  const [typeNames, setTypeNames]       = useState({})
   const [search, setSearch]             = useState('')
   const [selected, setSelected]         = useState({})
   const mounted = useRef(true)
 
-  // Загрузка прайслистов и типов категорий
   useEffect(() => {
     mounted.current = true
 
@@ -83,7 +84,6 @@ export default function PriceLists() {
     if (!mounted.current) return
     setLoadingItems(prev => ({ ...prev, [id]: true }))
 
-    // Загружаем позиции прайса
     const { data: pricingData, error } = await supabase
       .from('product_pricing')
       .select('sku_article, product_name, package_size, package_unit, final_price')
@@ -95,7 +95,6 @@ export default function PriceLists() {
       return
     }
 
-    // Загружаем type_id для каждого SKU
     const articles = (pricingData ?? []).map(r => r.sku_article)
     const { data: productsData } = await supabase
       .from('products')
@@ -150,13 +149,13 @@ export default function PriceLists() {
     )
   }
 
-  // Группировка по категории, ПЭТ отдельно
+  // Группировка: ПЭТ определяется по слову «ПЭТ» в названии — всегда в отдельный раздел в конце
   function groupRows(rows) {
-    const main = {}   // { typeId: [rows] }
+    const main = {}
     const pet  = []
 
     rows.forEach(r => {
-      if (r.type_id === PET_TYPE_ID) {
+      if (isPetProduct(r.product_name)) {
         pet.push(r)
       } else {
         const key = r.type_id ?? 0
@@ -165,7 +164,6 @@ export default function PriceLists() {
       }
     })
 
-    // Сортируем категории
     const sortedKeys = Object.keys(main)
       .map(Number)
       .sort((a, b) => getCategorySort(a) - getCategorySort(b))
@@ -179,9 +177,9 @@ export default function PriceLists() {
 
     if (pet.length > 0) {
       groups.push({
-        typeId: PET_TYPE_ID,
-        name: typeNames[PET_TYPE_ID] ?? 'ПЭТ-банки',
-        rows: pet,
+        typeId: 'pet',
+        name: 'Чай в ПЭТ банках',
+        rows: pet.sort((a, b) => (a.sku_article ?? '').localeCompare(b.sku_article ?? '')),
         isPet: true,
       })
     }
@@ -245,8 +243,7 @@ export default function PriceLists() {
 
     let globalIdx = 1
     groups.forEach((group, gi) => {
-      // Заголовок категории
-      sheetData.push([group.isPet ? '🗃 ' + group.name : '▸ ' + group.name])
+      sheetData.push([group.name])
       sheetData.push(['№', 'Артикул', 'Наименование', 'Фасовка', 'Цена без НДС, руб', 'Цена с НДС 22%, руб'])
 
       group.rows.forEach(item => {
@@ -310,7 +307,6 @@ export default function PriceLists() {
             return (
               <div key={l.id} className="card overflow-hidden">
 
-                {/* Заголовок прайслиста */}
                 <button
                   onClick={() => toggleList(l.id)}
                   className="w-full flex items-center justify-between py-1 hover:opacity-80 transition-opacity"
@@ -331,8 +327,6 @@ export default function PriceLists() {
 
                 {openId === l.id && (
                   <div className="mt-4">
-
-                    {/* Toolbar */}
                     <div className="flex items-center gap-3 mb-4">
                       <div className="relative flex-1 max-w-sm">
                         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
@@ -375,7 +369,6 @@ export default function PriceLists() {
                       )}
                     </div>
 
-                    {/* Таблица с группировкой */}
                     <div className="-mx-6 overflow-x-auto">
                       {loadingItems[l.id] ? (
                         <div className="px-6 pb-4 text-muted text-sm font-mono animate-pulse">Загрузка позиций...</div>
@@ -388,13 +381,11 @@ export default function PriceLists() {
                           <thead>
                             <tr className="border-t border-forest-light/20">
                               <th className="px-6 py-3 w-10">
-                                {visibleRows.length > 0 && (
-                                  <Checkbox
-                                    checked={allVisible}
-                                    indeterminate={!allVisible && someVisible}
-                                    onChange={() => toggleAll(l.id, visibleRows)}
-                                  />
-                                )}
+                                <Checkbox
+                                  checked={allVisible}
+                                  indeterminate={!allVisible && someVisible}
+                                  onChange={() => toggleAll(l.id, visibleRows)}
+                                />
                               </th>
                               <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-2 py-3 w-8">#</th>
                               <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-3">Артикул</th>
@@ -408,36 +399,35 @@ export default function PriceLists() {
                             {groups.map(group => {
                               const groupAllOn  = group.rows.every(r => selSet.has(r.sku_article))
                               const groupSomeOn = group.rows.some(r => selSet.has(r.sku_article))
-                              let rowIdx = 0
-                              // Считаем глобальный индекс для нумерации
                               const groupOffset = groups
                                 .slice(0, groups.indexOf(group))
                                 .reduce((acc, g) => acc + g.rows.length, 0)
 
                               return (
                                 <>
-                                  {/* Заголовок категории */}
-                                  <tr key={`group-${group.typeId}`} className="border-t border-forest-light/20">
-                                    <td className="px-6 py-2">
+                                  {/* Заголовок раздела */}
+                                  <tr key={`group-${group.typeId}`}
+                                    className={`border-t-2 ${group.isPet ? 'border-amber-500/40 bg-amber-900/10' : 'border-forest-light/30 bg-forest-light/5'}`}>
+                                    <td className="px-6 py-2.5">
                                       <Checkbox
                                         checked={groupAllOn}
                                         indeterminate={!groupAllOn && groupSomeOn}
                                         onChange={() => toggleGroup(l.id, group.rows)}
                                       />
                                     </td>
-                                    <td colSpan={6} className="px-2 py-2">
+                                    <td colSpan={6} className="px-2 py-2.5">
                                       <div className={`flex items-center gap-2 ${group.isPet ? 'text-amber-400' : 'text-gold'}`}>
-                                        <span className="text-xs font-body font-semibold uppercase tracking-widest">
-                                          {group.isPet ? '🗃 ' : '▸ '}{group.name}
+                                        <span className="font-body font-semibold text-sm uppercase tracking-wider">
+                                          {group.name}
                                         </span>
                                         <span className="text-muted font-mono text-xs">
-                                          ({group.rows.length} поз.)
+                                          — {group.rows.length} поз.
                                         </span>
                                       </div>
                                     </td>
                                   </tr>
 
-                                  {/* Строки категории */}
+                                  {/* Строки */}
                                   {group.rows.map((item, idx) => {
                                     const isChecked  = selSet.has(item.sku_article)
                                     const priceNoVat = Number(item.final_price) || 0

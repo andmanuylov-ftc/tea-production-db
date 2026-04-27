@@ -16,7 +16,7 @@
 ## Схема БД — все таблицы
 
 ### Основные
-- **raw_materials** — сырьё и материалы (471 позиция). Поля: `id, article, name, unit, category_id`
+- **raw_materials** — сырьё и материалы (474 позиции). Поля: `id, article, name, unit, category_id`
 - **material_categories** — категории сырья
 - **material_prices** — цены на сырьё с историей. Поля: `id, material_id, price_per_unit, valid_from, valid_to, supplier, notes`
 - **recipes** — рецепты чаёв. Поля: `id, article, name, description, output_quantity, output_unit, notes, is_active`
@@ -144,13 +144,14 @@
 ## Текущий статус (обновлено: 27.04.2026)
 
 ### Сырьё
-- **471 позиция**, цены на 07.03.2026 (новые позиции датированы 27.04.2026)
+- **474 позиции**, цены на 07.03.2026 (новые позиции датированы 27.04.2026)
+- Новые материалы этой сессии: **2572 «Черимойя (14355)»** (34 EUR = 3001.52 руб), **2614 «Яблоко кольца»** (300 руб)
 
-### Рецепты — 169 шт.
+### Рецепты — 216 шт.
 > Полный список всегда актуален в базе (таблица `recipes`, view `recipe_cost`).
 > Для получения списка с себестоимостью: `SELECT recipe_article, recipe_name, cost_per_kg FROM recipe_cost ORDER BY recipe_article`
 
-### SKU — 187 шт.
+### SKU — 240 шт.
 > Полный список в базе (таблица `products`, view `sku_cost`).
 
 ### Прайс-листы — 2 шт.

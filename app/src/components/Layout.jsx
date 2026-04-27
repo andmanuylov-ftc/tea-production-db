@@ -7,18 +7,20 @@ import {
   Layers,
   Wrench,
   FolderOpen,
-  FileText
+  FileText,
+  BookText
 } from 'lucide-react'
 
 const nav = [
-  { to: '/assortments', label: 'Ассортименты', icon: Layers },
-  { to: '/dashboard',   label: 'Дашборд',      icon: LayoutDashboard },
-  { to: '/recipes',     label: 'Рецепты',       icon: FlaskConical },
-  { to: '/skus',        label: 'SKU',           icon: Package },
-  { to: '/materials',   label: 'Сырьё',         icon: Leaf },
-  { to: '/constructor', label: 'Конструктор',   icon: Wrench },
-  { to: '/project',     label: 'Проект',        icon: FolderOpen },
-  { to: '/pricelists',  label: 'Прайс лист',    icon: FileText },
+  { to: '/assortments',  label: 'Ассортименты', icon: Layers },
+  { to: '/dashboard',    label: 'Дашборд',      icon: LayoutDashboard },
+  { to: '/recipes',      label: 'Рецепты',       icon: FlaskConical },
+  { to: '/skus',         label: 'SKU',           icon: Package },
+  { to: '/materials',    label: 'Сырьё',         icon: Leaf },
+  { to: '/constructor',  label: 'Конструктор',   icon: Wrench },
+  { to: '/project',      label: 'Проект',        icon: FolderOpen },
+  { to: '/descriptions', label: 'Описания',      icon: BookText },
+  { to: '/pricelists',   label: 'Прайс лист',    icon: FileText },
 ]
 
 export default function Layout({ children }) {
@@ -37,7 +39,7 @@ export default function Layout({ children }) {
           </div>
         </div>
 
-        <nav className="flex-1 px-3 py-4 space-y-1">
+        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {nav.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
@@ -57,7 +59,7 @@ export default function Layout({ children }) {
         </nav>
 
         <div className="px-6 py-4 border-t border-forest-light/40">
-          <div className="text-muted text-xs font-mono">v0.3.0</div>
+          <div className="text-muted text-xs font-mono">v0.4.0</div>
         </div>
       </aside>
 

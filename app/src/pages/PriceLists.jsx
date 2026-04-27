@@ -25,7 +25,6 @@ function isPetProduct(name) {
   return (name ?? '').toUpperCase().includes('ПЭТ')
 }
 
-// Форматирование фасовки: кг → гр., г → гр., шт остаётся шт
 function formatFasovka(size, unit) {
   if (!size) return '—'
   const n = Number(size)
@@ -59,6 +58,7 @@ export default function PriceLists() {
   const [typeNames, setTypeNames]       = useState({})
   const [search, setSearch]             = useState('')
   const [selected, setSelected]         = useState({})
+  const [descriptions, setDescriptions] = useState({})
   const mounted = useRef(true)
 
   useEffect(() => {
@@ -82,6 +82,20 @@ export default function PriceLists() {
         const map = {}
         ;(data ?? []).forEach(t => { map[t.id] = t.name })
         setTypeNames(map)
+      })
+
+    // Загружаем все описания
+    supabase
+      .from('product_descriptions')
+      .select('product_id, description, products(article)')
+      .not('description', 'is', null)
+      .then(({ data }) => {
+        if (!mounted.current) return
+        const map = {}
+        ;(data ?? []).forEach(d => {
+          if (d.products?.article) map[d.products.article] = d.description
+        })
+        setDescriptions(map)
       })
 
     return () => { mounted.current = false }
@@ -249,7 +263,7 @@ export default function PriceLists() {
     let globalIdx = 1
     groups.forEach((group, gi) => {
       sheetData.push([group.name])
-      sheetData.push(['№', 'Артикул', 'Наименование', 'Фасовка', 'Цена без НДС, руб', 'Цена с НДС 22%, руб'])
+      sheetData.push(['№', 'Артикул', 'Наименование', 'Фасовка', 'Цена без НДС, руб', 'Цена с НДС 22%, руб', 'Описание'])
 
       group.rows.forEach(item => {
         const priceNoVat = Number(item.final_price) || 0
@@ -261,6 +275,7 @@ export default function PriceLists() {
           formatFasovka(item.package_size, item.package_unit),
           Math.round(priceNoVat * 100) / 100,
           priceVat,
+          descriptions[item.sku_article] ?? '',
         ])
       })
 
@@ -268,7 +283,10 @@ export default function PriceLists() {
     })
 
     const ws = XLSX.utils.aoa_to_sheet(sheetData)
-    ws['!cols'] = [{ wch: 5 }, { wch: 16 }, { wch: 40 }, { wch: 12 }, { wch: 20 }, { wch: 22 }]
+    ws['!cols'] = [
+      { wch: 5 }, { wch: 16 }, { wch: 40 }, { wch: 12 },
+      { wch: 20 }, { wch: 22 }, { wch: 50 },
+    ]
 
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Прайс-лист')
@@ -395,7 +413,8 @@ export default function PriceLists() {
                               <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-3">Наименование</th>
                               <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-4 py-3">Фасовка</th>
                               <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-4 py-3 text-gold">Цена без НДС, руб</th>
-                              <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-6 py-3 text-gold/70">Цена с НДС 22%, руб</th>
+                              <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-4 py-3 text-gold/70">Цена с НДС 22%, руб</th>
+                              <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-3">Описание</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -417,7 +436,7 @@ export default function PriceLists() {
                                         onChange={() => toggleGroup(l.id, group.rows)}
                                       />
                                     </td>
-                                    <td colSpan={6} className="px-2 py-2.5">
+                                    <td colSpan={7} className="px-2 py-2.5">
                                       <div className={`flex items-center gap-2 ${group.isPet ? 'text-amber-400' : 'text-gold'}`}>
                                         <span className="font-body font-semibold text-sm uppercase tracking-wider">
                                           {group.name}
@@ -434,6 +453,7 @@ export default function PriceLists() {
                                     const priceNoVat = Number(item.final_price) || 0
                                     const priceVat   = priceNoVat * (1 + VAT)
                                     const globalNum  = groupOffset + idx + 1
+                                    const desc       = descriptions[item.sku_article]
                                     return (
                                       <tr
                                         key={item.sku_article}
@@ -467,8 +487,15 @@ export default function PriceLists() {
                                         <td className="px-4 py-2.5 text-gold font-mono text-right font-medium">
                                           {fmt(priceNoVat)}
                                         </td>
-                                        <td className="px-6 py-2.5 text-gold/70 font-mono text-right">
+                                        <td className="px-4 py-2.5 text-gold/70 font-mono text-right">
                                           {fmt(priceVat)}
+                                        </td>
+                                        <td className="px-4 py-2.5 text-muted/80 font-body text-xs max-w-xs">
+                                          {desc ? (
+                                            <span className="text-cream/60 italic">{desc}</span>
+                                          ) : (
+                                            <span className="text-muted/30">—</span>
+                                          )}
                                         </td>
                                       </tr>
                                     )

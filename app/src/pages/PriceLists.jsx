@@ -5,8 +5,25 @@ import PageHeader from '../components/PageHeader'
 import { ChevronDown, ChevronRight, Download, FileText, Search, X } from 'lucide-react'
 
 const VAT = 0.22
+const PET_TYPE_ID = 27
 
-// Чекбокс с поддержкой indeterminate
+// Порядок категорий в таблице
+const CATEGORY_SORT = {
+  28: 10, 37: 11, 38: 12,       // Черные чаи
+  29: 20, 40: 21, 41: 22,       // Зеленые чаи
+  30: 30, 42: 31, 43: 32, 44: 33, // Улуны
+  31: 40,                        // Пуэры
+  32: 50,                        // Красные чаи
+  39: 55,                        // Моносорта зелёный
+  33: 60, 34: 61, 45: 62, 46: 63, // Травяные
+  35: 70, 47: 71, 48: 72,        // Фруктово-ягодные
+  27: 999,                       // ПЭТ — всегда последним
+}
+
+function getCategorySort(typeId) {
+  return CATEGORY_SORT[typeId] ?? 500
+}
+
 function Checkbox({ checked, indeterminate, onChange, className = '' }) {
   const ref = useRef(null)
   useEffect(() => {
@@ -27,14 +44,17 @@ export default function PriceLists() {
   const [lists, setLists]               = useState([])
   const [loading, setLoading]           = useState(true)
   const [openId, setOpenId]             = useState(null)
-  const [items, setItems]               = useState({})           // { listId: [...rows] }
+  const [items, setItems]               = useState({})
   const [loadingItems, setLoadingItems] = useState({})
+  const [typeNames, setTypeNames]       = useState({})   // { id: name }
   const [search, setSearch]             = useState('')
-  const [selected, setSelected]         = useState({})           // { listId: Set<sku_article> }
+  const [selected, setSelected]         = useState({})
   const mounted = useRef(true)
 
+  // Загрузка прайслистов и типов категорий
   useEffect(() => {
     mounted.current = true
+
     supabase
       .from('price_lists')
       .select('id, name, markup_percent')
@@ -44,6 +64,17 @@ export default function PriceLists() {
         setLists(data ?? [])
         setLoading(false)
       })
+
+    supabase
+      .from('product_types')
+      .select('id, name')
+      .then(({ data }) => {
+        if (!mounted.current) return
+        const map = {}
+        ;(data ?? []).forEach(t => { map[t.id] = t.name })
+        setTypeNames(map)
+      })
+
     return () => { mounted.current = false }
   }, [])
 
@@ -51,13 +82,37 @@ export default function PriceLists() {
     if (items[id] || loadingItems[id]) return
     if (!mounted.current) return
     setLoadingItems(prev => ({ ...prev, [id]: true }))
-    const { data, error } = await supabase
+
+    // Загружаем позиции прайса
+    const { data: pricingData, error } = await supabase
       .from('product_pricing')
-      .select('sku_article, product_name, package_size, package_unit, total_sku_cost, final_price')
+      .select('sku_article, product_name, package_size, package_unit, final_price')
       .eq('price_list_id', id)
       .order('sku_article')
+
+    if (error || !mounted.current) {
+      setLoadingItems(prev => ({ ...prev, [id]: false }))
+      return
+    }
+
+    // Загружаем type_id для каждого SKU
+    const articles = (pricingData ?? []).map(r => r.sku_article)
+    const { data: productsData } = await supabase
+      .from('products')
+      .select('article, type_id')
+      .in('article', articles)
+
     if (!mounted.current) return
-    if (!error) setItems(prev => ({ ...prev, [id]: data ?? [] }))
+
+    const typeMap = {}
+    ;(productsData ?? []).forEach(p => { typeMap[p.article] = p.type_id })
+
+    const merged = (pricingData ?? []).map(r => ({
+      ...r,
+      type_id: typeMap[r.sku_article] ?? null,
+    }))
+
+    setItems(prev => ({ ...prev, [id]: merged }))
     setLoadingItems(prev => ({ ...prev, [id]: false }))
   }
 
@@ -95,10 +150,47 @@ export default function PriceLists() {
     )
   }
 
-  // ─── Управление выделением ───────────────────────────────────────────────
-  function getSet(listId) {
-    return selected[listId] ?? new Set()
+  // Группировка по категории, ПЭТ отдельно
+  function groupRows(rows) {
+    const main = {}   // { typeId: [rows] }
+    const pet  = []
+
+    rows.forEach(r => {
+      if (r.type_id === PET_TYPE_ID) {
+        pet.push(r)
+      } else {
+        const key = r.type_id ?? 0
+        if (!main[key]) main[key] = []
+        main[key].push(r)
+      }
+    })
+
+    // Сортируем категории
+    const sortedKeys = Object.keys(main)
+      .map(Number)
+      .sort((a, b) => getCategorySort(a) - getCategorySort(b))
+
+    const groups = sortedKeys.map(typeId => ({
+      typeId,
+      name: typeNames[typeId] ?? `Категория ${typeId}`,
+      rows: main[typeId],
+      isPet: false,
+    }))
+
+    if (pet.length > 0) {
+      groups.push({
+        typeId: PET_TYPE_ID,
+        name: typeNames[PET_TYPE_ID] ?? 'ПЭТ-банки',
+        rows: pet,
+        isPet: true,
+      })
+    }
+
+    return groups
   }
+
+  // ─── Выделение ──────────────────────────────────────────────────────────
+  function getSet(listId) { return selected[listId] ?? new Set() }
 
   function toggleRow(listId, key) {
     setSelected(prev => {
@@ -108,10 +200,21 @@ export default function PriceLists() {
     })
   }
 
+  function toggleGroup(listId, groupRows) {
+    setSelected(prev => {
+      const s    = new Set(prev[listId] ?? [])
+      const keys = groupRows.map(r => r.sku_article)
+      const allOn = keys.every(k => s.has(k))
+      if (allOn) keys.forEach(k => s.delete(k))
+      else       keys.forEach(k => s.add(k))
+      return { ...prev, [listId]: s }
+    })
+  }
+
   function toggleAll(listId, visibleRows) {
     setSelected(prev => {
-      const s     = new Set(prev[listId] ?? [])
-      const keys  = visibleRows.map(r => r.sku_article)
+      const s    = new Set(prev[listId] ?? [])
+      const keys = visibleRows.map(r => r.sku_article)
       const allOn = keys.every(k => s.has(k))
       if (allOn) keys.forEach(k => s.delete(k))
       else       keys.forEach(k => s.add(k))
@@ -124,45 +227,51 @@ export default function PriceLists() {
   }
 
   // ─── Экспорт ─────────────────────────────────────────────────────────────
-  function exportToXls(list, rows) {
-    const today = new Date().toLocaleDateString('ru-RU')
+  function exportToXls(list, allRows) {
+    const today  = new Date().toLocaleDateString('ru-RU')
     const selSet = getSet(list.id)
-    const exportRows = selSet.size > 0 ? rows.filter(r => selSet.has(r.sku_article)) : rows
+    const visible = filteredRows(allRows)
+    const exportRows = selSet.size > 0
+      ? visible.filter(r => selSet.has(r.sku_article))
+      : visible
+
+    const groups = groupRows(exportRows)
 
     const sheetData = [
       [`${list.name} (+${list.markup_percent}%)`],
       [`Дата выгрузки: ${today}`],
       [],
-      ['№', 'Артикул', 'Наименование', 'Фасовка', 'Цена без НДС, руб', 'Цена с НДС 22%, руб'],
     ]
 
-    exportRows.forEach((item, idx) => {
-      const priceNoVat = Number(item.final_price) || 0
-      const priceVat   = Math.round(priceNoVat * (1 + VAT) * 100) / 100
-      const fasovka    = item.package_size ? `${item.package_size} ${item.package_unit}` : '—'
-      sheetData.push([
-        idx + 1,
-        item.sku_article ?? '—',
-        item.product_name ?? '—',
-        fasovka,
-        Math.round(priceNoVat * 100) / 100,
-        priceVat,
-      ])
+    let globalIdx = 1
+    groups.forEach((group, gi) => {
+      // Заголовок категории
+      sheetData.push([group.isPet ? '🗃 ' + group.name : '▸ ' + group.name])
+      sheetData.push(['№', 'Артикул', 'Наименование', 'Фасовка', 'Цена без НДС, руб', 'Цена с НДС 22%, руб'])
+
+      group.rows.forEach(item => {
+        const priceNoVat = Number(item.final_price) || 0
+        const priceVat   = Math.round(priceNoVat * (1 + VAT) * 100) / 100
+        const fasovka    = item.package_size ? `${item.package_size} ${item.package_unit}` : '—'
+        sheetData.push([
+          globalIdx++,
+          item.sku_article ?? '—',
+          item.product_name ?? '—',
+          fasovka,
+          Math.round(priceNoVat * 100) / 100,
+          priceVat,
+        ])
+      })
+
+      if (gi < groups.length - 1) sheetData.push([])
     })
 
     const ws = XLSX.utils.aoa_to_sheet(sheetData)
-    ws['!cols'] = [
-      { wch: 5 },
-      { wch: 16 },
-      { wch: 40 },
-      { wch: 12 },
-      { wch: 20 },
-      { wch: 22 },
-    ]
+    ws['!cols'] = [{ wch: 5 }, { wch: 16 }, { wch: 40 }, { wch: 12 }, { wch: 20 }, { wch: 22 }]
 
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Прайс-лист')
-    const suffix = selSet.size > 0 ? ` (${selSet.size} поз)` : ''
+    const suffix   = selSet.size > 0 ? ` (${selSet.size} поз)` : ''
     const filename = `${list.name} +${list.markup_percent}%${suffix} ${today.replace(/\./g, '-')}.xlsx`
     XLSX.writeFile(wb, filename)
   }
@@ -172,7 +281,7 @@ export default function PriceLists() {
     <div className="p-8">
       <PageHeader
         title="ПРАЙС ЛИСТ"
-        subtitle="Цены без НДС и с НДС (22%)"
+        subtitle="Цены без НДС и с НДС (22%), сгруппированы по видам чая"
         action={
           <div className="flex items-center gap-2 text-muted text-xs font-body">
             <FileText size={14} />
@@ -190,17 +299,18 @@ export default function PriceLists() {
       ) : (
         <div className="flex flex-col gap-4">
           {lists.map(l => {
-            const allRows      = items[l.id] ?? []
-            const visibleRows  = filteredRows(allRows)
-            const selSet       = getSet(l.id)
-            const selCount     = selSet.size
-            const allVisible   = visibleRows.length > 0 && visibleRows.every(r => selSet.has(r.sku_article))
-            const someVisible  = visibleRows.some(r => selSet.has(r.sku_article))
+            const allRows     = items[l.id] ?? []
+            const visibleRows = filteredRows(allRows)
+            const groups      = groupRows(visibleRows)
+            const selSet      = getSet(l.id)
+            const selCount    = selSet.size
+            const allVisible  = visibleRows.length > 0 && visibleRows.every(r => selSet.has(r.sku_article))
+            const someVisible = visibleRows.some(r => selSet.has(r.sku_article))
 
             return (
               <div key={l.id} className="card overflow-hidden">
 
-                {/* Заголовок */}
+                {/* Заголовок прайслиста */}
                 <button
                   onClick={() => toggleList(l.id)}
                   className="w-full flex items-center justify-between py-1 hover:opacity-80 transition-opacity"
@@ -219,7 +329,6 @@ export default function PriceLists() {
                   </div>
                 </button>
 
-                {/* Поиск + панель действий + таблица */}
                 {openId === l.id && (
                   <div className="mt-4">
 
@@ -236,32 +345,23 @@ export default function PriceLists() {
                                      text-cream text-sm font-body focus:outline-none focus:border-gold/50 placeholder:text-muted"
                         />
                         {search && (
-                          <button
-                            onClick={() => setSearch('')}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-cream transition-colors"
-                          >
+                          <button onClick={() => setSearch('')}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-cream transition-colors">
                             <X size={13} />
                           </button>
                         )}
                       </div>
 
-                      {/* Счётчик и сброс выделения */}
                       {selCount > 0 && (
                         <div className="flex items-center gap-2">
-                          <span className="text-gold text-xs font-mono">
-                            {selCount} выбрано
-                          </span>
-                          <button
-                            onClick={() => clearSelection(l.id)}
-                            className="text-muted hover:text-cream transition-colors"
-                            title="Снять выделение"
-                          >
+                          <span className="text-gold text-xs font-mono">{selCount} выбрано</span>
+                          <button onClick={() => clearSelection(l.id)}
+                            className="text-muted hover:text-cream transition-colors" title="Снять выделение">
                             <X size={13} />
                           </button>
                         </div>
                       )}
 
-                      {/* Кнопка выгрузки */}
                       {allRows.length > 0 && (
                         <button
                           onClick={() => exportToXls(l, allRows)}
@@ -275,86 +375,119 @@ export default function PriceLists() {
                       )}
                     </div>
 
-                    {/* Таблица */}
+                    {/* Таблица с группировкой */}
                     <div className="-mx-6 overflow-x-auto">
                       {loadingItems[l.id] ? (
                         <div className="px-6 pb-4 text-muted text-sm font-mono animate-pulse">Загрузка позиций...</div>
-                      ) : (() => {
-                        return (
-                          <table className="w-full text-sm">
-                            <thead>
-                              <tr className="border-t border-forest-light/20">
-                                <th className="px-6 py-3 w-10">
-                                  {visibleRows.length > 0 && (
-                                    <Checkbox
-                                      checked={allVisible}
-                                      indeterminate={!allVisible && someVisible}
-                                      onChange={() => toggleAll(l.id, visibleRows)}
-                                    />
-                                  )}
-                                </th>
-                                <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-2 py-3 w-8">#</th>
-                                <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-3">Артикул</th>
-                                <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-3">Наименование</th>
-                                <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-4 py-3">Фасовка</th>
-                                <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-4 py-3 text-gold">Цена без НДС, руб</th>
-                                <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-6 py-3 text-gold/70">Цена с НДС 22%, руб</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {visibleRows.length === 0 ? (
-                                <tr>
-                                  <td colSpan={7} className="px-6 py-8 text-center text-muted text-sm font-body">
-                                    {search ? `Ничего не найдено по запросу «${search}»` : 'Нет данных'}
-                                  </td>
-                                </tr>
-                              ) : visibleRows.map((item, idx) => {
-                                const isChecked  = selSet.has(item.sku_article)
-                                const priceNoVat = Number(item.final_price) || 0
-                                const priceVat   = priceNoVat * (1 + VAT)
-                                return (
-                                  <tr
-                                    key={item.sku_article}
-                                    onClick={() => toggleRow(l.id, item.sku_article)}
-                                    className={`border-t border-forest-light/10 cursor-pointer transition-colors
-                                      ${isChecked
-                                        ? 'bg-gold/10 hover:bg-gold/15'
-                                        : idx % 2 !== 0
-                                          ? 'bg-forest-light/5 hover:bg-forest-light/10'
-                                          : 'hover:bg-forest-light/5'
-                                      }`}
-                                  >
-                                    <td className="px-6 py-2.5" onClick={e => e.stopPropagation()}>
+                      ) : visibleRows.length === 0 ? (
+                        <div className="px-6 pb-4 text-center text-muted text-sm font-body py-8">
+                          {search ? `Ничего не найдено по запросу «${search}»` : 'Нет данных'}
+                        </div>
+                      ) : (
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-t border-forest-light/20">
+                              <th className="px-6 py-3 w-10">
+                                {visibleRows.length > 0 && (
+                                  <Checkbox
+                                    checked={allVisible}
+                                    indeterminate={!allVisible && someVisible}
+                                    onChange={() => toggleAll(l.id, visibleRows)}
+                                  />
+                                )}
+                              </th>
+                              <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-2 py-3 w-8">#</th>
+                              <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-3">Артикул</th>
+                              <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-3">Наименование</th>
+                              <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-4 py-3">Фасовка</th>
+                              <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-4 py-3 text-gold">Цена без НДС, руб</th>
+                              <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-6 py-3 text-gold/70">Цена с НДС 22%, руб</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {groups.map(group => {
+                              const groupAllOn  = group.rows.every(r => selSet.has(r.sku_article))
+                              const groupSomeOn = group.rows.some(r => selSet.has(r.sku_article))
+                              let rowIdx = 0
+                              // Считаем глобальный индекс для нумерации
+                              const groupOffset = groups
+                                .slice(0, groups.indexOf(group))
+                                .reduce((acc, g) => acc + g.rows.length, 0)
+
+                              return (
+                                <>
+                                  {/* Заголовок категории */}
+                                  <tr key={`group-${group.typeId}`} className="border-t border-forest-light/20">
+                                    <td className="px-6 py-2">
                                       <Checkbox
-                                        checked={isChecked}
-                                        onChange={() => toggleRow(l.id, item.sku_article)}
+                                        checked={groupAllOn}
+                                        indeterminate={!groupAllOn && groupSomeOn}
+                                        onChange={() => toggleGroup(l.id, group.rows)}
                                       />
                                     </td>
-                                    <td className="px-2 py-2.5 text-muted font-mono text-xs text-right">{idx + 1}</td>
-                                    <td className="px-4 py-2.5">
-                                      <span className="badge bg-gold/10 text-gold border border-gold/20 font-mono text-xs px-2 py-0.5 rounded whitespace-nowrap">
-                                        {highlight(item.sku_article ?? '—')}
-                                      </span>
-                                    </td>
-                                    <td className="px-4 py-2.5 text-cream font-body">
-                                      {highlight(item.product_name ?? '—')}
-                                    </td>
-                                    <td className="px-4 py-2.5 text-muted font-mono text-right whitespace-nowrap">
-                                      {item.package_size ? `${item.package_size} ${item.package_unit}` : '—'}
-                                    </td>
-                                    <td className="px-4 py-2.5 text-gold font-mono text-right font-medium">
-                                      {fmt(priceNoVat)}
-                                    </td>
-                                    <td className="px-6 py-2.5 text-gold/70 font-mono text-right">
-                                      {fmt(priceVat)}
+                                    <td colSpan={6} className="px-2 py-2">
+                                      <div className={`flex items-center gap-2 ${group.isPet ? 'text-amber-400' : 'text-gold'}`}>
+                                        <span className="text-xs font-body font-semibold uppercase tracking-widest">
+                                          {group.isPet ? '🗃 ' : '▸ '}{group.name}
+                                        </span>
+                                        <span className="text-muted font-mono text-xs">
+                                          ({group.rows.length} поз.)
+                                        </span>
+                                      </div>
                                     </td>
                                   </tr>
-                                )
-                              })}
-                            </tbody>
-                          </table>
-                        )
-                      })()}
+
+                                  {/* Строки категории */}
+                                  {group.rows.map((item, idx) => {
+                                    const isChecked  = selSet.has(item.sku_article)
+                                    const priceNoVat = Number(item.final_price) || 0
+                                    const priceVat   = priceNoVat * (1 + VAT)
+                                    const globalNum  = groupOffset + idx + 1
+                                    return (
+                                      <tr
+                                        key={item.sku_article}
+                                        onClick={() => toggleRow(l.id, item.sku_article)}
+                                        className={`border-t border-forest-light/10 cursor-pointer transition-colors
+                                          ${isChecked
+                                            ? 'bg-gold/10 hover:bg-gold/15'
+                                            : idx % 2 !== 0
+                                              ? 'bg-forest-light/5 hover:bg-forest-light/10'
+                                              : 'hover:bg-forest-light/5'
+                                          }`}
+                                      >
+                                        <td className="px-6 py-2.5" onClick={e => e.stopPropagation()}>
+                                          <Checkbox
+                                            checked={isChecked}
+                                            onChange={() => toggleRow(l.id, item.sku_article)}
+                                          />
+                                        </td>
+                                        <td className="px-2 py-2.5 text-muted font-mono text-xs text-right">{globalNum}</td>
+                                        <td className="px-4 py-2.5">
+                                          <span className="badge bg-gold/10 text-gold border border-gold/20 font-mono text-xs px-2 py-0.5 rounded whitespace-nowrap">
+                                            {highlight(item.sku_article ?? '—')}
+                                          </span>
+                                        </td>
+                                        <td className="px-4 py-2.5 text-cream font-body">
+                                          {highlight(item.product_name ?? '—')}
+                                        </td>
+                                        <td className="px-4 py-2.5 text-muted font-mono text-right whitespace-nowrap">
+                                          {item.package_size ? `${item.package_size} ${item.package_unit}` : '—'}
+                                        </td>
+                                        <td className="px-4 py-2.5 text-gold font-mono text-right font-medium">
+                                          {fmt(priceNoVat)}
+                                        </td>
+                                        <td className="px-6 py-2.5 text-gold/70 font-mono text-right">
+                                          {fmt(priceVat)}
+                                        </td>
+                                      </tr>
+                                    )
+                                  })}
+                                </>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      )}
                     </div>
                   </div>
                 )}

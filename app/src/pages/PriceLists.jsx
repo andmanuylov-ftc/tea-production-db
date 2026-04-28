@@ -65,6 +65,11 @@ function Checkbox({ checked, indeterminate, onChange, className = '' }) {
   )
 }
 
+// Конвертация адреса ячейки из {r, c} в строку "A1"
+function cellAddr(r, c) {
+  return XLSX.utils.encode_cell({ r, c })
+}
+
 export default function PriceLists() {
   const [rows, setRows]             = useState([])
   const [loading, setLoading]       = useState(true)
@@ -97,7 +102,6 @@ export default function PriceLists() {
 
     if (!mounted.current) return
 
-    // type_id для каждого SKU
     const { data: productsData } = await supabase
       .from('products')
       .select('id, article, type_id')
@@ -229,6 +233,9 @@ export default function PriceLists() {
 
     const exportGroups = groupRows(exportRows)
 
+    // Индекс столбца «Описание» (0-based): №=0,Арт=1,Наим=2,Вес=3,T1=4,T2=5,T3=6,T4=7,Описание=8
+    const DESC_COL = 8
+
     const sheetData = [
       ['Прайс-лист ПЧК/ADDIS'],
       [`Дата выгрузки: ${today}`],
@@ -260,11 +267,49 @@ export default function PriceLists() {
     })
 
     const ws = XLSX.utils.aoa_to_sheet(sheetData)
+
+    // Ширины столбцов (оптимизированы под A4 landscape)
     ws['!cols'] = [
-      { wch: 5 }, { wch: 16 }, { wch: 40 }, { wch: 10 },
-      { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 },
-      { wch: 50 },
+      { wch: 4  },  // №
+      { wch: 14 },  // Артикул
+      { wch: 32 },  // Наименование
+      { wch: 8  },  // Вес, гр.
+      { wch: 15 },  // Tier 1
+      { wch: 15 },  // Tier 2
+      { wch: 15 },  // Tier 3
+      { wch: 15 },  // Tier 4
+      { wch: 28 },  // Описание (сужен)
     ]
+
+    // A4 landscape, подогнать по ширине на 1 страницу
+    ws['!pageSetup'] = {
+      paperSize: 9,          // 9 = A4
+      orientation: 'landscape',
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+    }
+
+    ws['!margins'] = {
+      left: 0.4, right: 0.4,
+      top: 0.6,  bottom: 0.6,
+      header: 0.2, footer: 0.2,
+    }
+
+    // Левое выравнивание + перенос текста для всех ячеек столбца «Описание»
+    const range = XLSX.utils.decode_range(ws['!ref'] ?? 'A1')
+    for (let R = range.s.r; R <= range.e.r; R++) {
+      const addr = cellAddr(R, DESC_COL)
+      if (ws[addr]) {
+        ws[addr].s = {
+          alignment: {
+            horizontal: 'left',
+            vertical: 'top',
+            wrapText: true,
+          },
+        }
+      }
+    }
 
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Прайс-лист')
@@ -369,7 +414,6 @@ export default function PriceLists() {
 
                   return (
                     <>
-                      {/* Заголовок группы */}
                       <tr key={`group-${group.typeId}`}
                         className={`border-t-2 ${group.isPet ? 'border-amber-500/40 bg-amber-900/10' : 'border-forest-light/30 bg-forest-light/5'}`}>
                         <td className="px-4 py-2.5">
@@ -391,7 +435,6 @@ export default function PriceLists() {
                         </td>
                       </tr>
 
-                      {/* Строки */}
                       {group.rows.map((item, idx) => {
                         const isChecked = selected.has(item.sku_article)
                         const globalNum = groupOffset + idx + 1

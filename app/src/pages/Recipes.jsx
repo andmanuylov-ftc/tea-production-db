@@ -17,7 +17,7 @@ export default function Recipes() {
   const [deleting,     setDeleting]     = useState(false)
 
   // edit modal
-  const [editRecipe,      setEditRecipe]      = useState(null)   // row object
+  const [editRecipe,      setEditRecipe]      = useState(null)
   const [editForm,        setEditForm]        = useState({})
   const [editIngredients, setEditIngredients] = useState([])
   const [loadingIng,      setLoadingIng]      = useState(false)
@@ -44,14 +44,47 @@ export default function Recipes() {
     setSelected(article)
     const { data: rec } = await supabase.from('recipes').select('id').eq('article', article).single()
     if (!rec) return
+
     const { data } = await supabase
       .from('recipe_ingredients')
-      .select(`quantity, unit, raw_materials(article,name), sub_recipe:recipes!sub_recipe_id(article,name)`)
+      .select(`quantity, unit, material_id, sub_recipe_id, raw_materials(article,name), sub_recipe:recipes!sub_recipe_id(article,name,id)`)
       .eq('recipe_id', rec.id)
-    setIngredients(data ?? [])
+
+    const ings = data ?? []
+
+    const materialIds   = ings.filter(i => i.material_id).map(i => i.material_id)
+    const subRecipeIds  = ings.filter(i => i.sub_recipe_id).map(i => i.sub_recipe_id)
+
+    const [pricesRes, recCostsRes] = await Promise.all([
+      materialIds.length > 0
+        ? supabase.from('raw_materials_with_price').select('id,current_price').in('id', materialIds)
+        : Promise.resolve({ data: [] }),
+      subRecipeIds.length > 0
+        ? supabase.from('recipe_cost').select('recipe_id,cost_per_kg').in('recipe_id', subRecipeIds)
+        : Promise.resolve({ data: [] }),
+    ])
+
+    const priceMap = {}
+    ;(pricesRes.data ?? []).forEach(p => { priceMap[p.id] = p.current_price })
+    const recCostMap = {}
+    ;(recCostsRes.data ?? []).forEach(rc => { recCostMap[rc.recipe_id] = rc.cost_per_kg })
+
+    const enriched = ings.map(ing => {
+      const qty = parseFloat(ing.quantity) || 0
+      const unitPrice = ing.material_id
+        ? (priceMap[ing.material_id] ?? null)
+        : (recCostMap[ing.sub_recipe_id] ?? null)
+      return {
+        ...ing,
+        unit_price: unitPrice,
+        line_cost: unitPrice != null ? unitPrice * qty : null,
+      }
+    })
+
+    setIngredients(enriched)
   }
 
-  // ── Start Edit: load ingredients ──
+  // ── Start Edit ──
   async function startEdit(row, e) {
     e.stopPropagation()
     setOpenMenu(null)
@@ -128,13 +161,11 @@ export default function Recipes() {
     if (!editRecipe) return
     setSaving(true)
 
-    // 1. Update recipe meta
     await supabase.from('recipes').update({
       article: editForm.article.trim(),
       name:    editForm.name.trim(),
     }).eq('id', editRecipe.recipe_id)
 
-    // 2. Replace all ingredients
     await supabase.from('recipe_ingredients').delete().eq('recipe_id', editRecipe.recipe_id)
     if (editIngredients.length > 0) {
       await supabase.from('recipe_ingredients').insert(
@@ -148,7 +179,6 @@ export default function Recipes() {
       )
     }
 
-    // 3. Update list
     setRows(prev => prev.map(r =>
       r.recipe_id === editRecipe.recipe_id
         ? { ...r, recipe_article: editForm.article.trim(), recipe_name: editForm.name.trim() }
@@ -156,11 +186,14 @@ export default function Recipes() {
     ))
     if (selected === editRecipe.recipe_article) {
       setSelected(editForm.article.trim())
-      // Refresh detail panel
       const mapped = editIngredients.map(ing => ({
         quantity: ing.quantity, unit: ing.unit,
+        material_id: ing.material_id,
+        sub_recipe_id: ing.sub_recipe_id,
         raw_materials: ing.type === 'material' ? { article: ing.article, name: ing.name } : null,
         sub_recipe:    ing.type === 'recipe'   ? { article: ing.article, name: ing.name } : null,
+        unit_price: null,
+        line_cost: null,
       }))
       setIngredients(mapped)
     }
@@ -194,6 +227,12 @@ export default function Recipes() {
     r.recipe_article.toLowerCase().includes(search.toLowerCase()) ||
     r.recipe_name.toLowerCase().includes(search.toLowerCase())
   )
+
+  // Итого по составу панели
+  const knownTotal = ingredients.reduce((sum, ing) => {
+    return ing.line_cost != null ? sum + ing.line_cost : sum
+  }, 0)
+  const hasUnknownPrice = ingredients.some(ing => ing.line_cost == null)
 
   return (
     <div className="p-8">
@@ -266,7 +305,7 @@ export default function Recipes() {
 
         {/* Detail panel */}
         {selected && (
-          <div className="w-80 card flex-shrink-0">
+          <div className="w-80 card flex-shrink-0 flex flex-col">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-display text-base font-semibold text-cream">
                 Состав рецепта
@@ -276,25 +315,61 @@ export default function Recipes() {
                 <X size={16} />
               </button>
             </div>
-            <div className="space-y-2">
+
+            {/* Заголовок колонок */}
+            <div className="flex justify-between items-center pb-1.5 mb-1 border-b border-forest-light/20">
+              <span className="text-muted text-xs font-body uppercase tracking-widest">Ингредиент</span>
+              <div className="flex gap-3 items-center">
+                <span className="text-muted text-xs font-body uppercase tracking-widest w-16 text-right">кол-во</span>
+                <span className="text-muted text-xs font-body uppercase tracking-widest w-20 text-right">стоимость</span>
+              </div>
+            </div>
+
+            {/* Список */}
+            <div className="space-y-0.5 flex-1">
               {ingredients.map((ing, i) => {
-                const name = ing.raw_materials?.name ?? ing.sub_recipe?.name ?? '—'
-                const art  = ing.raw_materials?.article ?? ing.sub_recipe?.article ?? ''
-                const isSub = !!ing.sub_recipe
+                const name    = ing.raw_materials?.name ?? ing.sub_recipe?.name ?? '—'
+                const art     = ing.raw_materials?.article ?? ing.sub_recipe?.article ?? ''
+                const isSub   = !!ing.sub_recipe
                 return (
-                  <div key={i} className="flex justify-between items-center py-1.5 border-b border-forest-light/30">
-                    <div>
-                      <div className="text-cream text-xs font-body flex items-center gap-1.5">
+                  <div key={i} className="flex justify-between items-center py-1.5 border-b border-forest-light/20">
+                    <div className="flex-1 min-w-0 mr-2">
+                      <div className="text-cream text-xs font-body flex items-center gap-1.5 leading-tight">
                         {isSub && <FlaskConical size={10} className="text-gold/70 flex-shrink-0" />}
-                        {name}
+                        <span className="truncate">{name}</span>
                       </div>
                       <div className="text-muted text-xs font-mono">{art}</div>
                     </div>
-                    <div className="text-gold font-mono text-xs ml-4 whitespace-nowrap">{ing.quantity} {ing.unit}</div>
+                    <div className="flex gap-3 items-center flex-shrink-0">
+                      <div className="text-gold font-mono text-xs w-16 text-right whitespace-nowrap">
+                        {ing.quantity} {ing.unit}
+                      </div>
+                      <div className="font-mono text-xs w-20 text-right whitespace-nowrap">
+                        {ing.line_cost != null
+                          ? <span className="text-cream/80">{ing.line_cost.toFixed(2)}</span>
+                          : <span className="text-muted/50">—</span>
+                        }
+                      </div>
+                    </div>
                   </div>
                 )
               })}
             </div>
+
+            {/* Итого */}
+            {ingredients.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-forest-light/40 flex justify-between items-baseline">
+                <span className="text-muted text-xs font-body uppercase tracking-widest">Итого</span>
+                <div className="text-right">
+                  <span className="text-gold font-mono text-sm font-semibold">
+                    {knownTotal.toFixed(2)} руб
+                  </span>
+                  {hasUnknownPrice && (
+                    <div className="text-muted/60 text-xs font-body">* часть цен отсутствует</div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -304,7 +379,6 @@ export default function Recipes() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-forest-dark/80 backdrop-blur-sm p-4">
           <div className="bg-forest border border-forest-light/40 rounded-xl shadow-2xl w-[560px] max-h-[90vh] flex flex-col">
 
-            {/* Header */}
             <div className="flex items-center justify-between p-6 border-b border-forest-light/30">
               <div>
                 <h3 className="font-display text-lg text-cream">Редактировать рецепт</h3>
@@ -313,10 +387,7 @@ export default function Recipes() {
               <button onClick={() => setEditRecipe(null)} className="text-muted hover:text-cream"><X size={16} /></button>
             </div>
 
-            {/* Scrollable body */}
             <div className="flex-1 overflow-y-auto p-6 space-y-5">
-
-              {/* Meta fields */}
               <div className="flex gap-3">
                 <div className="w-36">
                   <label className="text-muted text-xs uppercase tracking-widest font-body block mb-1.5">Артикул</label>
@@ -338,7 +409,6 @@ export default function Recipes() {
                 </div>
               </div>
 
-              {/* Ingredients */}
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-muted text-xs uppercase tracking-widest font-body">Состав</span>
@@ -352,19 +422,16 @@ export default function Recipes() {
                     {editIngredients.map(ing => (
                       <div key={ing.tempId}
                         className="flex items-center gap-2 bg-forest-dark rounded-lg px-3 py-2 group">
-                        {/* Type indicator */}
                         <div className="flex-shrink-0">
                           {ing.type === 'recipe'
                             ? <FlaskConical size={12} className="text-gold/60" />
                             : <div className="w-3 h-3 rounded-full bg-forest-light/50" />
                           }
                         </div>
-                        {/* Name */}
                         <div className="flex-1 min-w-0">
                           <div className="text-cream text-xs font-body truncate">{ing.name}</div>
                           <div className="text-muted text-xs font-mono">{ing.article}</div>
                         </div>
-                        {/* Quantity */}
                         <input
                           type="number"
                           step="0.001"
@@ -375,7 +442,6 @@ export default function Recipes() {
                                      text-cream text-xs font-mono text-right
                                      focus:outline-none focus:border-gold/50"
                         />
-                        {/* Unit */}
                         <select
                           value={ing.unit}
                           onChange={e => updateIngredient(ing.tempId, 'unit', e.target.value)}
@@ -387,7 +453,6 @@ export default function Recipes() {
                           <option value="г">г</option>
                           <option value="мл">мл</option>
                         </select>
-                        {/* Remove */}
                         <button
                           onClick={() => removeIngredient(ing.tempId)}
                           className="text-muted/40 hover:text-red-400 transition-colors flex-shrink-0 opacity-0 group-hover:opacity-100"
@@ -399,7 +464,6 @@ export default function Recipes() {
                   </div>
                 )}
 
-                {/* Search & add */}
                 <div className="relative">
                   <div className="flex items-center gap-2 bg-forest-dark border border-forest-light/40 rounded-lg px-3 py-2
                                   focus-within:border-gold/50 transition-colors">
@@ -416,7 +480,6 @@ export default function Recipes() {
                     {ingSearching && <div className="w-3 h-3 border border-gold/60 border-t-transparent rounded-full animate-spin flex-shrink-0" />}
                   </div>
 
-                  {/* Dropdown */}
                   {showResults && ingResults.length > 0 && (
                     <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-forest-dark border border-forest-light/50
                                     rounded-lg shadow-2xl max-h-56 overflow-y-auto">
@@ -455,7 +518,6 @@ export default function Recipes() {
               </div>
             </div>
 
-            {/* Footer */}
             <div className="flex gap-3 justify-end p-6 border-t border-forest-light/30">
               <button onClick={() => setEditRecipe(null)}
                 className="px-4 py-2 text-sm text-muted hover:text-cream font-body transition-colors">

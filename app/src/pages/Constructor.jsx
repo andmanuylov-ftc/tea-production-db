@@ -52,6 +52,23 @@ function downloadTemplate() {
   XLSX.writeFile(wb, 'template_constructor.xlsx')
 }
 
+// Итого по количеству: г+кг сводится в кг, шт и мл отдельно
+function formatQtyTotals(items) {
+  let kg = 0, pcs = 0, ml = 0
+  for (const i of items ?? []) {
+    const q = parseFloat(i.quantity) || 0
+    if (i.unit === 'кг')      kg  += q
+    else if (i.unit === 'г')  kg  += q / 1000
+    else if (i.unit === 'шт') pcs += q
+    else if (i.unit === 'мл') ml  += q
+  }
+  const parts = []
+  if (kg  > 0) parts.push(kg.toLocaleString('ru-RU',  { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + ' кг')
+  if (pcs > 0) parts.push(pcs.toLocaleString('ru-RU', { maximumFractionDigits: 2 }) + ' шт')
+  if (ml  > 0) parts.push(ml.toLocaleString('ru-RU',  { maximumFractionDigits: 2 }) + ' мл')
+  return parts.length === 0 ? '—' : parts.join(' • ')
+}
+
 // ---------- Component ----------
 
 export default function Constructor() {
@@ -335,6 +352,7 @@ export default function Constructor() {
   })()
 
   const isSku = type === 'sku'
+  const showQtyTotal = type === 'recipe' && items.length > 0
 
   return (
     <div className="p-8">
@@ -531,6 +549,14 @@ export default function Constructor() {
               </tbody>
             </table>
           </div>
+
+          {/* Итого количество — только для рецепта */}
+          {showQtyTotal && (
+            <div className="card p-3 mb-4 flex justify-between items-center">
+              <span className="text-muted text-xs font-body uppercase tracking-widest">Итого количество</span>
+              <span className="text-cream font-mono font-semibold text-sm">{formatQtyTotals(items)}</span>
+            </div>
+          )}
 
           {error && <p className="text-red-400 text-sm font-body mb-3">{error}</p>}
           <button

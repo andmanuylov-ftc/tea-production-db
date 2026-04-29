@@ -21,6 +21,23 @@ function fmt(val) {
   return Number(val).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+// Итого по количеству: г+кг сводится в кг, шт и мл отдельно
+function formatQtyTotals(items) {
+  let kg = 0, pcs = 0, ml = 0
+  for (const i of items ?? []) {
+    const q = parseFloat(i.quantity) || 0
+    if (i.unit === 'кг')      kg  += q
+    else if (i.unit === 'г')  kg  += q / 1000
+    else if (i.unit === 'шт') pcs += q
+    else if (i.unit === 'мл') ml  += q
+  }
+  const parts = []
+  if (kg  > 0) parts.push(kg.toLocaleString('ru-RU',  { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + ' кг')
+  if (pcs > 0) parts.push(pcs.toLocaleString('ru-RU', { maximumFractionDigits: 2 }) + ' шт')
+  if (ml  > 0) parts.push(ml.toLocaleString('ru-RU',  { maximumFractionDigits: 2 }) + ' мл')
+  return parts.length === 0 ? '—' : parts.join(' • ')
+}
+
 const emptyPromote = { article: '', name: '', packageSize: '', saving: false, error: '', done: false }
 
 export default function Project() {
@@ -278,6 +295,7 @@ export default function Project() {
               const projCosts = costs[p.id]
               const prom      = promote[p.id]
               const isSku     = p.type === 'sku'
+              const showQtyTotal = p.type === 'recipe' && (items[p.id]?.length ?? 0) > 0
 
               return (
                 <div key={p.id} className={`card overflow-hidden transition-all ${editProject?.id === p.id ? 'border-gold/30' : ''}`}>
@@ -370,10 +388,20 @@ export default function Project() {
                             </tbody>
                           </table>
 
-                          {projCosts && (
-                            <div className="border-t-2 border-forest-light/30 mx-6 mt-1 pt-3 pb-4 flex justify-between items-center">
-                              <span className="text-muted text-xs font-body uppercase tracking-widest">Итого себестоимость</span>
-                              <span className="text-gold font-mono font-semibold text-sm">{fmt(projCosts.total)} руб.</span>
+                          {(showQtyTotal || projCosts) && (
+                            <div className="border-t-2 border-forest-light/30 mx-6 mt-1 pt-3 pb-4 space-y-2">
+                              {showQtyTotal && (
+                                <div className="flex justify-between items-center">
+                                  <span className="text-muted text-xs font-body uppercase tracking-widest">Итого количество</span>
+                                  <span className="text-cream font-mono font-semibold text-sm">{formatQtyTotals(items[p.id])}</span>
+                                </div>
+                              )}
+                              {projCosts && (
+                                <div className="flex justify-between items-center">
+                                  <span className="text-muted text-xs font-body uppercase tracking-widest">Итого себестоимость</span>
+                                  <span className="text-gold font-mono font-semibold text-sm">{fmt(projCosts.total)} руб.</span>
+                                </div>
+                              )}
                             </div>
                           )}
 

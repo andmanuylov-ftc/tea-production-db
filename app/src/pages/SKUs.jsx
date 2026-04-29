@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 import PageHeader from '../components/PageHeader'
-import { Search, Filter, X, Upload, ImageOff, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
+import { Search, Filter, X, Upload, ImageOff, MoreHorizontal, Pencil, Trash2, Download } from 'lucide-react'
 
 export default function SKUs() {
   const [searchParams] = useSearchParams()
@@ -18,11 +19,15 @@ export default function SKUs() {
   const [uploading, setUploading]   = useState(false)
   const fileRef = useRef(null)
 
+  // export menu
+  const [exportOpen, setExportOpen] = useState(false)
+  const exportRef = useRef(null)
+
   // menu / edit / delete
-  const [openMenu,  setOpenMenu]  = useState(null)   // sku_article
-  const [editSku,   setEditSku]   = useState(null)   // row object
+  const [openMenu,  setOpenMenu]  = useState(null)
+  const [editSku,   setEditSku]   = useState(null)
   const [editForm,  setEditForm]  = useState({})
-  const [deleteSku, setDeleteSku] = useState(null)   // row object
+  const [deleteSku, setDeleteSku] = useState(null)
   const [saving,    setSaving]    = useState(false)
   const [deleting,  setDeleting]  = useState(false)
 
@@ -56,11 +61,72 @@ export default function SKUs() {
     })
   }, [])
 
-  // Предзаполнение поиска из URL ?q= (для перехода со страницы Сырьё → Где используется)
+  // Предзаполнение поиска из URL ?q=
   useEffect(() => {
     const q = searchParams.get('q')
     if (q) setSearch(q)
   }, [searchParams])
+
+  // закрыть меню экспорта при клике вне
+  useEffect(() => {
+    function handle(e) {
+      if (exportRef.current && !exportRef.current.contains(e.target)) setExportOpen(false)
+    }
+    document.addEventListener('mousedown', handle)
+    return () => document.removeEventListener('mousedown', handle)
+  }, [])
+
+  // ───── Экспорт в Excel ─────
+  function exportToExcel(markupPercent) {
+    const typeMap = Object.fromEntries(types.map(t => [t.id, t]))
+    const factor  = 1 + markupPercent / 100
+
+    const data = filtered.map(r => {
+      const type = typeMap[r.type_id]
+      return {
+        'Артикул':              r.sku_article,
+        'Название':             r._name ?? r.product_name,
+        'Код категории':       type?.code ?? '',
+        'Категория':            type?.name ?? '',
+        'Купаж, руб':           Number(r.blend_cost),
+        'Упаковка, руб':       Number(r.packaging_cost),
+        'Итого себест., руб': Number(r.total_sku_cost),
+        [`Цена +${markupPercent}%, руб`]: Math.round(Number(r.total_sku_cost) * factor * 100) / 100,
+      }
+    })
+
+    const ws = XLSX.utils.json_to_sheet(data)
+
+    // Ширина колонок
+    ws['!cols'] = [
+      { wch: 14 },  // Артикул
+      { wch: 50 },  // Название
+      { wch: 8  },  // Код
+      { wch: 28 },  // Категория
+      { wch: 12 },  // Купаж
+      { wch: 14 },  // Упаковка
+      { wch: 18 },  // Итого
+      { wch: 16 },  // Цена +N%
+    ]
+
+    // Числовой формат для колонок E-H (индекс 4..7)
+    const range = XLSX.utils.decode_range(ws['!ref'])
+    for (let R = range.s.r + 1; R <= range.e.r; R++) {
+      for (let C = 4; C <= 7; C++) {
+        const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })]
+        if (cell) cell.z = '#,##0.00'
+      }
+    }
+
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Себестоимость SKU')
+
+    const today = new Date().toISOString().slice(0, 10)
+    const filterSuffix = (search || typeFilter !== 'all') ? '_filtered' : ''
+    XLSX.writeFile(wb, `SKU_себестоимость_plus${markupPercent}_${today}${filterSuffix}.xlsx`)
+
+    setExportOpen(false)
+  }
 
   async function openSKU(row) {
     if (selected?.sku_article === row.sku_article) {
@@ -128,7 +194,6 @@ export default function SKUs() {
     setRows(prev => prev.map(r => r.product_id === selected.product_id ? { ...r, photo_url: null } : r))
   }
 
-  // ── Edit ──
   function startEdit(row, e) {
     e.stopPropagation()
     setOpenMenu(null)
@@ -157,7 +222,6 @@ export default function SKUs() {
     setSaving(false)
   }
 
-  // ── Delete ──
   function startDelete(row, e) {
     e.stopPropagation()
     setOpenMenu(null)
@@ -202,7 +266,41 @@ export default function SKUs() {
 
   return (
     <div className="p-8">
-      <PageHeader title="SKU" subtitle={`${rows.length} позиций`} />
+      <PageHeader
+        title="SKU"
+        subtitle={`${rows.length} позиций`}
+        action={
+          <div className="relative" ref={exportRef}>
+            <button
+              onClick={() => setExportOpen(!exportOpen)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gold/15 text-gold
+                         border border-gold/20 text-sm font-body hover:bg-gold/25 transition-all"
+            >
+              <Download size={14} />
+              Экспорт в Excel
+            </button>
+            {exportOpen && (
+              <div className="absolute right-0 top-11 z-50 w-56 bg-forest border border-forest-light/50
+                              rounded-lg shadow-2xl overflow-hidden">
+                <div className="px-4 py-2 text-xs text-muted font-body border-b border-forest-light/30">
+                  С наценкой к себестоимости
+                </div>
+                {[40, 50, 100].map(p => (
+                  <button
+                    key={p}
+                    onClick={() => exportToExcel(p)}
+                    className="w-full flex justify-between items-center px-4 py-2.5 text-sm font-body
+                               text-cream hover:bg-forest-light/50 transition-colors text-left"
+                  >
+                    <span>+{p}%</span>
+                    <span className="text-muted text-xs font-mono">{filtered.length} SKU</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        }
+      />
 
       {/* Filters */}
       <div className="flex gap-4 mb-6">
@@ -234,11 +332,9 @@ export default function SKUs() {
         </div>
       </div>
 
-      {/* Click-outside overlay for menu */}
       {openMenu && <div className="fixed inset-0 z-40" onClick={() => setOpenMenu(null)} />}
 
       <div className="flex gap-6">
-        {/* Table */}
         <div className="flex-1 card p-0 overflow-hidden">
           <table className="w-full">
             <thead className="bg-forest">
@@ -310,7 +406,6 @@ export default function SKUs() {
           </table>
         </div>
 
-        {/* Detail panel */}
         {selected && (
           <div className="w-80 flex-shrink-0 card overflow-y-auto max-h-[calc(100vh-10rem)]">
             <div className="flex items-start justify-between mb-4">
@@ -325,7 +420,6 @@ export default function SKUs() {
               </button>
             </div>
 
-            {/* Фото */}
             <div className="mb-5">
               {selected.photo_url ? (
                 <div className="relative group">
@@ -430,7 +524,6 @@ export default function SKUs() {
         )}
       </div>
 
-      {/* ── Edit Modal ── */}
       {editSku && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-forest-dark/80 backdrop-blur-sm">
           <div className="bg-forest border border-forest-light/40 rounded-xl p-6 w-[420px] shadow-2xl">
@@ -484,7 +577,6 @@ export default function SKUs() {
         </div>
       )}
 
-      {/* ── Delete Confirm Modal ── */}
       {deleteSku && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-forest-dark/80 backdrop-blur-sm">
           <div className="bg-forest border border-forest-light/40 rounded-xl p-6 w-96 shadow-2xl">

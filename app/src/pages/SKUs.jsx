@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import PageHeader from '../components/PageHeader'
 import { Search, Filter, X, Upload, ImageOff, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
 
 export default function SKUs() {
+  const [searchParams] = useSearchParams()
   const [rows, setRows]             = useState([])
   const [types, setTypes]           = useState([])
   const [loading, setLoading]       = useState(true)
@@ -53,6 +55,12 @@ export default function SKUs() {
       setLoading(false)
     })
   }, [])
+
+  // Предзаполнение поиска из URL ?q= (для перехода со страницы Сырьё → Где используется)
+  useEffect(() => {
+    const q = searchParams.get('q')
+    if (q) setSearch(q)
+  }, [searchParams])
 
   async function openSKU(row) {
     if (selected?.sku_article === row.sku_article) {

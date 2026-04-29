@@ -2,19 +2,55 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import PageHeader from '../components/PageHeader'
-import { Search, Pencil, Trash2, X, Check, Clock, MoreHorizontal, Upload } from 'lucide-react'
+import {
+  Search, Pencil, Trash2, X, Check, Clock, MoreHorizontal, Upload,
+  Eye, FlaskConical, Package, ExternalLink, ArrowRight,
+} from 'lucide-react'
+
+// нормализация в кг (для расчёта долей в рецептах, где output_unit обычно 'кг')
+function toKg(quantity, unit) {
+  const q = parseFloat(quantity) || 0
+  if (unit === 'г')  return q / 1000
+  if (unit === 'кг') return q
+  return q // для шт/мл — оставим как есть; доля будет рассчитана условно
+}
+
+function fmt(val) {
+  if (val == null) return '—'
+  return Number(val).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function fmtDate(d) {
+  if (!d) return '—'
+  return new Date(d).toLocaleDateString('ru-RU')
+}
+
+function fmtShare(n) {
+  if (n == null || isNaN(n)) return '—'
+  if (n < 0.01) return '<0,01%'
+  return n.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%'
+}
 
 export default function Materials() {
   const navigate = useNavigate()
   const [rows, setRows]               = useState([])
   const [loading, setLoading]         = useState(true)
   const [search, setSearch]           = useState('')
+
+  // edit panel
   const [editRow, setEditRow]         = useState(null)
   const [editName, setEditName]       = useState('')
   const [editPrice, setEditPrice]     = useState('')
   const [history, setHistory]         = useState([])
   const [histLoading, setHistLoading] = useState(false)
   const [saving, setSaving]           = useState(false)
+
+  // usage panel
+  const [usageRow, setUsageRow]         = useState(null)
+  const [usage, setUsage]               = useState(null)
+  const [loadingUsage, setLoadingUsage] = useState(false)
+
+  // row menu
   const [confirmId, setConfirmId]     = useState(null)
   const [openMenuId, setOpenMenuId]   = useState(null)
   const mounted = useRef(true)
@@ -44,8 +80,11 @@ export default function Materials() {
     if (mounted.current) { setRows(data ?? []); setLoading(false) }
   }
 
+  // ───── Edit panel ─────
+
   async function openEdit(row) {
     setOpenMenuId(null)
+    setUsageRow(null); setUsage(null) // закрываем usage если было
     setEditRow(row)
     setEditName(row.name)
     setEditPrice('')
@@ -85,17 +124,194 @@ export default function Materials() {
     setConfirmId(null)
     setOpenMenuId(null)
     setRows(prev => prev.filter(r => r.id !== id))
+    if (usageRow?.id === id) { setUsageRow(null); setUsage(null) }
+    if (editRow?.id === id) setEditRow(null)
   }
 
-  function fmt(val) {
-    if (val == null) return '—'
-    return Number(val).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  // ───── Usage panel ─────
+
+  async function openUsage(row) {
+    setOpenMenuId(null)
+    setEditRow(null) // закрываем edit
+    setUsageRow(row)
+    setUsage(null)
+    setLoadingUsage(true)
+
+    const matId = row.id
+
+    // 1) Прямое использование в recipe_ingredients (как material_id)
+    const { data: directIngs } = await supabase
+      .from('recipe_ingredients')
+      .select('recipe_id, quantity, unit')
+      .eq('material_id', matId)
+
+    const directRecipeIds = [...new Set((directIngs ?? []).map(r => r.recipe_id))]
+
+    // 2) Данные этих рецептов
+    const { data: directRecipesData } = directRecipeIds.length
+      ? await supabase
+          .from('recipes')
+          .select('id, article, name, output_quantity, output_unit')
+          .in('id', directRecipeIds)
+      : { data: [] }
+
+    const directRecipesMap = Object.fromEntries((directRecipesData ?? []).map(r => [r.id, r]))
+
+    // считаем долю материала в каждом рецепте (если в одном рецепте несколько строк — суммируем)
+    const directRecipesAgg = {}
+    for (const ing of directIngs ?? []) {
+      const rec = directRecipesMap[ing.recipe_id]
+      if (!rec) continue
+      const qtyKg    = toKg(ing.quantity, ing.unit)
+      const outputKg = toKg(rec.output_quantity, rec.output_unit)
+      const share = outputKg > 0 ? (qtyKg / outputKg) * 100 : null
+      if (!directRecipesAgg[rec.id]) {
+        directRecipesAgg[rec.id] = { id: rec.id, article: rec.article, name: rec.name, sharePercent: share }
+      } else if (share != null) {
+        directRecipesAgg[rec.id].sharePercent =
+          (directRecipesAgg[rec.id].sharePercent ?? 0) + share
+      }
+    }
+    const directRecipes = Object.values(directRecipesAgg)
+      .sort((a, b) => (b.sharePercent ?? 0) - (a.sharePercent ?? 0))
+
+    // 3) Косвенное использование: где directRecipes лежат как sub_recipe в других рецептах
+    const { data: parentIngs } = directRecipeIds.length
+      ? await supabase
+          .from('recipe_ingredients')
+          .select('recipe_id, sub_recipe_id, quantity, unit')
+          .in('sub_recipe_id', directRecipeIds)
+      : { data: [] }
+
+    const parentRecipeIds = [...new Set((parentIngs ?? []).map(r => r.recipe_id))]
+    const { data: parentRecipesData } = parentRecipeIds.length
+      ? await supabase
+          .from('recipes')
+          .select('id, article, name, output_quantity, output_unit')
+          .in('id', parentRecipeIds)
+      : { data: [] }
+
+    const parentRecipesMap = Object.fromEntries((parentRecipesData ?? []).map(r => [r.id, r]))
+
+    // для каждой связи: материал → подрецепт (sub) → parent
+    const indirectRecipesAgg = {}
+    for (const ing of parentIngs ?? []) {
+      const sub    = directRecipesAgg[ing.sub_recipe_id]
+      const parent = parentRecipesMap[ing.recipe_id]
+      if (!sub || !parent) continue
+
+      const subQtyKg       = toKg(ing.quantity, ing.unit)
+      const parentOutputKg = toKg(parent.output_quantity, parent.output_unit)
+      const subShareInParent = parentOutputKg > 0 ? (subQtyKg / parentOutputKg) : 0
+      const matShareInSub    = sub.sharePercent != null ? sub.sharePercent / 100 : null
+      const finalShare = matShareInSub != null ? matShareInSub * subShareInParent * 100 : null
+
+      if (!indirectRecipesAgg[parent.id]) {
+        indirectRecipesAgg[parent.id] = {
+          id: parent.id,
+          article: parent.article,
+          name: parent.name,
+          sharePercent: finalShare,
+          vias: new Set([sub.article]),
+        }
+      } else {
+        if (finalShare != null) {
+          indirectRecipesAgg[parent.id].sharePercent =
+            (indirectRecipesAgg[parent.id].sharePercent ?? 0) + finalShare
+        }
+        indirectRecipesAgg[parent.id].vias.add(sub.article)
+      }
+    }
+    const indirectRecipes = Object.values(indirectRecipesAgg)
+      .map(r => ({ ...r, via: [...r.vias].join(', ') }))
+      .sort((a, b) => (b.sharePercent ?? 0) - (a.sharePercent ?? 0))
+
+    // 4) Прямое использование в SKU (sku_recipe_components.material_id)
+    const { data: directSkuComps } = await supabase
+      .from('sku_recipe_components')
+      .select('product_id, quantity, unit')
+      .eq('material_id', matId)
+
+    const directProductIds = [...new Set((directSkuComps ?? []).map(c => c.product_id))]
+    const { data: directProductsData } = directProductIds.length
+      ? await supabase
+          .from('products')
+          .select('id, article, name')
+          .in('id', directProductIds)
+      : { data: [] }
+    const directProductsMap = Object.fromEntries((directProductsData ?? []).map(p => [p.id, p]))
+
+    const directSkusAgg = {}
+    for (const c of directSkuComps ?? []) {
+      const p = directProductsMap[c.product_id]
+      if (!p) continue
+      if (!directSkusAgg[p.id]) {
+        directSkusAgg[p.id] = {
+          id: p.id, article: p.article, name: p.name,
+          quantity: parseFloat(c.quantity) || 0,
+          unit: c.unit,
+        }
+      } else {
+        // если несколько строк того же материала в одном SKU — суммируем (если ед. совпадают)
+        if (directSkusAgg[p.id].unit === c.unit) {
+          directSkusAgg[p.id].quantity += parseFloat(c.quantity) || 0
+        }
+      }
+    }
+    const directSkus = Object.values(directSkusAgg).sort((a, b) => a.article.localeCompare(b.article))
+
+    // 5) Косвенное использование в SKU: SKU содержит recipe_id, который входит в 
+    //    directRecipeIds (материал прямо в рецепте) или parentRecipeIds (материал через sub)
+    const allRecipeIdsForSku = [...new Set([...directRecipeIds, ...parentRecipeIds])]
+    const { data: indirectSkuComps } = allRecipeIdsForSku.length
+      ? await supabase
+          .from('sku_recipe_components')
+          .select('product_id, recipe_id, quantity, unit')
+          .in('recipe_id', allRecipeIdsForSku)
+      : { data: [] }
+
+    const indirectProductIds = [...new Set((indirectSkuComps ?? []).map(c => c.product_id))]
+    const { data: indirectProductsData } = indirectProductIds.length
+      ? await supabase
+          .from('products')
+          .select('id, article, name')
+          .in('id', indirectProductIds)
+      : { data: [] }
+    const indirectProductsMap = Object.fromEntries((indirectProductsData ?? []).map(p => [p.id, p]))
+
+    const allRecipesMap = { ...directRecipesMap, ...parentRecipesMap }
+    const indirectSkusAgg = {}
+    for (const c of indirectSkuComps ?? []) {
+      const p   = indirectProductsMap[c.product_id]
+      const rec = allRecipesMap[c.recipe_id]
+      if (!p || !rec) continue
+      if (!indirectSkusAgg[p.id]) {
+        indirectSkusAgg[p.id] = {
+          id: p.id, article: p.article, name: p.name,
+          vias: new Set([rec.article]),
+        }
+      } else {
+        indirectSkusAgg[p.id].vias.add(rec.article)
+      }
+    }
+    const indirectSkus = Object.values(indirectSkusAgg)
+      .map(s => ({ ...s, via: [...s.vias].join(', ') }))
+      .sort((a, b) => a.article.localeCompare(b.article))
+
+    if (mounted.current) {
+      setUsage({ directRecipes, indirectRecipes, directSkus, indirectSkus })
+      setLoadingUsage(false)
+    }
   }
 
-  function fmtDate(d) {
-    if (!d) return '—'
-    return new Date(d).toLocaleDateString('ru-RU')
+  function goToRecipe(article) {
+    navigate('/recipes?q=' + encodeURIComponent(article))
   }
+  function goToSku(article) {
+    navigate('/skus?q=' + encodeURIComponent(article))
+  }
+
+  // ───── Render ─────
 
   const filtered = rows.filter(r =>
     r.article.toLowerCase().includes(search.toLowerCase()) ||
@@ -142,7 +358,7 @@ export default function Materials() {
                 <th className="bg-forest text-muted text-xs uppercase tracking-widest p-4 font-body text-left">Ед.</th>
                 <th className="bg-forest text-muted text-xs uppercase tracking-widest p-4 font-body text-right">Цена без НДС, руб.</th>
                 <th className="bg-forest text-muted text-xs uppercase tracking-widest p-4 font-body text-right">Дата цены</th>
-                <th className="bg-forest w-12 rounded-tr-[var(--border-radius-lg)]"></th>
+                <th className="bg-forest w-20 rounded-tr-[var(--border-radius-lg)]"></th>
               </tr>
             </thead>
             <tbody>
@@ -151,7 +367,7 @@ export default function Materials() {
               ) : filtered.length === 0 ? (
                 <tr><td colSpan={6} className="p-8 text-muted text-sm text-center font-body">Ничего не найдено</td></tr>
               ) : filtered.map(r => (
-                <tr key={r.id} className={`table-row ${editRow?.id === r.id ? 'bg-gold/5' : ''}`}>
+                <tr key={r.id} className={`table-row ${editRow?.id === r.id || usageRow?.id === r.id ? 'bg-gold/5' : ''}`}>
                   <td className="p-4 border-t border-forest-light/20">
                     <span className="badge bg-forest-light text-cream border border-forest-light font-mono text-xs">
                       {r.article}
@@ -162,53 +378,67 @@ export default function Materials() {
                   <td className="p-4 border-t border-forest-light/20 text-right font-mono text-sm text-gold">{fmt(r.current_price)}</td>
                   <td className="p-4 border-t border-forest-light/20 text-right font-mono text-xs text-muted">{fmtDate(r.price_date)}</td>
 
-                  <td className="p-2 border-t border-forest-light/20 text-right" ref={openMenuId === r.id ? menuRef : null}>
-                    <div className="relative inline-block">
+                  <td className="p-2 border-t border-forest-light/20 text-right">
+                    <div className="flex items-center justify-end gap-0.5" ref={openMenuId === r.id ? menuRef : null}>
                       <button
-                        onClick={() => setOpenMenuId(openMenuId === r.id ? null : r.id)}
-                        className="p-1.5 rounded-md text-muted hover:text-cream hover:bg-forest-light/50 transition-colors"
+                        onClick={() => openUsage(r)}
+                        title="Где используется"
+                        className={`p-1.5 rounded-md transition-colors ${
+                          usageRow?.id === r.id
+                            ? 'text-gold bg-gold/10'
+                            : 'text-muted hover:text-cream hover:bg-forest-light/50'
+                        }`}
                       >
-                        <MoreHorizontal size={16} />
+                        <Eye size={15} />
                       </button>
 
-                      {openMenuId === r.id && (
-                        <div className="absolute right-0 top-8 z-50 w-40 bg-forest border border-forest-light/50
-                                        rounded-lg shadow-lg overflow-hidden">
-                          <button
-                            onClick={() => openEdit(r)}
-                            className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-body
-                                       text-cream hover:bg-forest-light/50 transition-colors text-left"
-                          >
-                            <Pencil size={13} className="text-muted" />
-                            Изменить
-                          </button>
-                          {confirmId === r.id ? (
-                            <div className="px-4 py-2.5 border-t border-forest-light/30">
-                              <p className="text-xs text-muted font-body mb-2">Удалить позицию?</p>
-                              <div className="flex gap-2">
-                                <button onClick={() => deleteRow(r.id)}
-                                  className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 transition-colors">
-                                  <Check size={12} /> Да
-                                </button>
-                                <button onClick={() => { setConfirmId(null); setOpenMenuId(null) }}
-                                  className="flex items-center gap-1 text-xs text-muted hover:text-cream transition-colors">
-                                  <X size={12} /> Нет
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
+                      <div className="relative">
+                        <button
+                          onClick={() => setOpenMenuId(openMenuId === r.id ? null : r.id)}
+                          className="p-1.5 rounded-md text-muted hover:text-cream hover:bg-forest-light/50 transition-colors"
+                        >
+                          <MoreHorizontal size={16} />
+                        </button>
+
+                        {openMenuId === r.id && (
+                          <div className="absolute right-0 top-8 z-50 w-40 bg-forest border border-forest-light/50
+                                          rounded-lg shadow-lg overflow-hidden">
                             <button
-                              onClick={() => setConfirmId(r.id)}
+                              onClick={() => openEdit(r)}
                               className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-body
-                                         text-red-400 hover:bg-red-400/10 transition-colors text-left
-                                         border-t border-forest-light/30"
+                                         text-cream hover:bg-forest-light/50 transition-colors text-left"
                             >
-                              <Trash2 size={13} />
-                              Удалить
+                              <Pencil size={13} className="text-muted" />
+                              Изменить
                             </button>
-                          )}
-                        </div>
-                      )}
+                            {confirmId === r.id ? (
+                              <div className="px-4 py-2.5 border-t border-forest-light/30">
+                                <p className="text-xs text-muted font-body mb-2">Удалить позицию?</p>
+                                <div className="flex gap-2">
+                                  <button onClick={() => deleteRow(r.id)}
+                                    className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 transition-colors">
+                                    <Check size={12} /> Да
+                                  </button>
+                                  <button onClick={() => { setConfirmId(null); setOpenMenuId(null) }}
+                                    className="flex items-center gap-1 text-xs text-muted hover:text-cream transition-colors">
+                                    <X size={12} /> Нет
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setConfirmId(r.id)}
+                                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-body
+                                           text-red-400 hover:bg-red-400/10 transition-colors text-left
+                                           border-t border-forest-light/30"
+                              >
+                                <Trash2 size={13} />
+                                Удалить
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </td>
                 </tr>
@@ -289,7 +519,148 @@ export default function Materials() {
             </button>
           </div>
         )}
+
+        {/* Панель «Где используется» */}
+        {usageRow && (
+          <div className="w-96 flex-shrink-0 card overflow-y-auto max-h-[calc(100vh-10rem)]">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-display text-sm font-semibold text-cream">Где используется</h3>
+              <button onClick={() => { setUsageRow(null); setUsage(null) }} className="text-muted hover:text-cream transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="mb-5 pb-3 border-b border-forest-light/30">
+              <span className="badge bg-forest-light text-cream border border-forest-light font-mono text-xs mr-2">
+                {usageRow.article}
+              </span>
+              <span className="text-cream text-xs font-body">{usageRow.name}</span>
+            </div>
+
+            {loadingUsage ? (
+              <p className="text-muted text-sm font-mono animate-pulse">Загрузка...</p>
+            ) : usage ? (
+              <div className="space-y-5">
+                {/* В рецептах прямо */}
+                <UsageSection
+                  icon={FlaskConical}
+                  iconColor="text-emerald-400"
+                  title="В рецептах (прямо)"
+                  count={usage.directRecipes.length}
+                  empty="нет"
+                >
+                  {usage.directRecipes.map(r => (
+                    <UsageRow
+                      key={r.id}
+                      onClick={() => goToRecipe(r.article)}
+                      article={r.article}
+                      name={r.name}
+                      right={<span className="text-gold font-mono text-xs">{fmtShare(r.sharePercent)}</span>}
+                    />
+                  ))}
+                </UsageSection>
+
+                {/* В рецептах через подрецепт */}
+                <UsageSection
+                  icon={FlaskConical}
+                  iconColor="text-emerald-400/70"
+                  title="В рецептах (через подрецепт)"
+                  count={usage.indirectRecipes.length}
+                  empty="нет"
+                >
+                  {usage.indirectRecipes.map(r => (
+                    <UsageRow
+                      key={r.id}
+                      onClick={() => goToRecipe(r.article)}
+                      article={r.article}
+                      name={r.name}
+                      sub={<span className="text-muted/70">через {r.via}</span>}
+                      right={<span className="text-gold font-mono text-xs">{fmtShare(r.sharePercent)}</span>}
+                    />
+                  ))}
+                </UsageSection>
+
+                {/* В SKU прямо */}
+                <UsageSection
+                  icon={Package}
+                  iconColor="text-amber-400"
+                  title="В SKU (прямо)"
+                  count={usage.directSkus.length}
+                  empty="нет"
+                >
+                  {usage.directSkus.map(s => (
+                    <UsageRow
+                      key={s.id}
+                      onClick={() => goToSku(s.article)}
+                      article={s.article}
+                      name={s.name}
+                      right={<span className="text-cream/80 font-mono text-xs">{s.quantity} {s.unit}</span>}
+                    />
+                  ))}
+                </UsageSection>
+
+                {/* В SKU через рецепт */}
+                <UsageSection
+                  icon={Package}
+                  iconColor="text-amber-400/70"
+                  title="В SKU (через рецепт)"
+                  count={usage.indirectSkus.length}
+                  empty="нет"
+                >
+                  {usage.indirectSkus.map(s => (
+                    <UsageRow
+                      key={s.id}
+                      onClick={() => goToSku(s.article)}
+                      article={s.article}
+                      name={s.name}
+                      sub={<span className="text-muted/70">через {s.via}</span>}
+                    />
+                  ))}
+                </UsageSection>
+              </div>
+            ) : null}
+          </div>
+        )}
       </div>
     </div>
+  )
+}
+
+// ───── Helpers ─────
+
+function UsageSection({ icon: Icon, iconColor, title, count, empty, children }) {
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-2">
+        <Icon size={12} className={iconColor} />
+        <span className={`text-xs font-body uppercase tracking-widest ${iconColor}`}>{title}</span>
+        <span className="text-muted text-xs font-mono ml-auto">{count}</span>
+      </div>
+      {count === 0 ? (
+        <p className="text-muted/40 text-xs font-body italic">{empty}</p>
+      ) : (
+        <div className="space-y-0.5">{children}</div>
+      )}
+    </div>
+  )
+}
+
+function UsageRow({ onClick, article, name, sub, right }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full flex items-center gap-2 py-2 px-2 -mx-2 rounded-md
+                 hover:bg-forest-light/40 transition-colors text-left group"
+    >
+      <div className="flex-1 min-w-0">
+        <div className="text-cream text-xs font-body truncate">{name}</div>
+        <div className="font-mono text-xs text-muted">
+          <span className="text-gold/80">{article}</span>
+          {sub && <> · {sub}</>}
+        </div>
+      </div>
+      {right && <div className="flex-shrink-0">{right}</div>}
+      <ExternalLink size={11} className="text-muted/40 group-hover:text-gold/80 transition-colors flex-shrink-0" />
+    </button>
   )
 }

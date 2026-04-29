@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import PageHeader from '../components/PageHeader'
 import { Search, X, MoreHorizontal, Pencil, Trash2, Plus, FlaskConical } from 'lucide-react'
 
 export default function Recipes() {
+  const [searchParams] = useSearchParams()
   const [rows, setRows]         = useState([])
   const [loading, setLoading]   = useState(true)
   const [search, setSearch]     = useState('')
@@ -38,6 +40,12 @@ export default function Recipes() {
       .order('recipe_article')
       .then(({ data }) => { setRows(data ?? []); setLoading(false) })
   }, [])
+
+  // Предзаполнение поиска из URL ?q= (для перехода со страницы Сырьё → Где используется)
+  useEffect(() => {
+    const q = searchParams.get('q')
+    if (q) setSearch(q)
+  }, [searchParams])
 
   async function openRecipe(article) {
     if (selected === article) { setSelected(null); setIngredients([]); return }

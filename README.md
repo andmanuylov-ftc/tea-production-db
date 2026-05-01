@@ -1,20 +1,24 @@
 # Tea Production DB
 
-База данных производства чая и чайных напитков.
+Веб-приложение и Edge Functions для работы с базой данных производства чая.
 
-## Supabase
-- Project URL: https://heznxwdrwyjipyracyqy.supabase.co
+## Стек
+- **БД:** Supabase (PostgreSQL)
+- **Frontend:** React + Vite + Tailwind, авто-деплой на Vercel
+- **Edge Functions:** Supabase Functions + Anthropic API
 
-## Структура репозитория
+## Структура
 ```
-docs/         — документация и прогресс
-migrations/   — SQL миграции схемы
-recipes/      — рецепты (SQL)
-sku/          — SKU / готовая продукция (SQL)
+app/                    — фронтенд (React + Vite)
+api/                    — серверные роуты
+supabase/functions/     — Edge Functions
+supabase/migrations/    — миграции схемы БД
 ```
 
-## Правила ведения данных
-- Единицы: только **кг** и **шт** (граммы запрещены)
-- Артикулы вносятся **строго как указано** — никаких замен
-- Цены — в рублях, с историей (valid_from)
-- Рецепт может содержать другой рецепт как компонент (под-рецепт)
+## Развёртывание
+- Frontend: автодеплой Vercel из `main`
+- Edge Functions: `supabase functions deploy <name>`
+- Миграции: `supabase db push`
+
+## Документация и данные
+Контекст для AI-сессий, рабочие инструкции и архив выгрузок — в приватном репозитории `andmanuylov-ftc/tea-production-data`.

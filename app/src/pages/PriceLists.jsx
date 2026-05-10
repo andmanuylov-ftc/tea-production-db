@@ -345,14 +345,22 @@ export default function PriceLists() {
         throw new Error(`Шаблон недоступен (${res.status})`)
       }
       const buffer = await res.arrayBuffer()
-      const wb = XLSXStyle.read(buffer, {
+      // Читаем стандартным xlsx (xlsx-js-style.read падает на сложном шаблоне)
+      const wb = XLSX.read(buffer, {
         type: 'array',
         cellFormula: true,
         cellStyles: true,
       })
 
+      const sheetNames = wb.SheetNames || []
+      console.log('Листы в шаблоне:', sheetNames)
+
       const sheet = wb.Sheets['Прайс-лист']
-      if (!sheet) throw new Error('В шаблоне нет листа «Прайс-лист»')
+      if (!sheet) {
+        throw new Error(
+          `В шаблоне нет листа «Прайс-лист». Найдены: ${sheetNames.join(', ') || '(нет)'}`
+        )
+      }
 
       // Готовим данные
       const exportRows = selCount > 0
@@ -381,7 +389,7 @@ export default function PriceLists() {
         }
         // Заливка пустых ячеек разделителя (B..Q = индексы 1..16)
         for (let col = 1; col <= 16; col++) {
-          const addr = XLSXStyle.utils.encode_cell({ r: row - 1, c: col })
+          const addr = XLSX.utils.encode_cell({ r: row - 1, c: col })
           if (!sheet[addr]) sheet[addr] = { t: 's', v: '' }
           sheet[addr].s = { fill: { patternType: 'solid', fgColor: { rgb: 'FFFFE4B5' } } }
         }
@@ -424,6 +432,7 @@ export default function PriceLists() {
       const today = new Date().toLocaleDateString('ru-RU').replace(/\./g, '-')
       const totalCount = exportRows.length
       const suffix = selCount > 0 ? ` (${totalCount} поз)` : ''
+      // Записываем через xlsx-js-style чтобы сохранить применённые стили
       XLSXStyle.writeFile(wb, `Клиентский прайс-лист ПЧК${suffix} ${today}.xlsx`)
     } catch (err) {
       console.error('Ошибка выгрузки клиентского прайса:', err)

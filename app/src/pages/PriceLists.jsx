@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
-import * as XLSXStyle from 'xlsx-js-style'
+import ExcelJS from 'exceljs'
 import { supabase } from '../lib/supabase'
 import PageHeader from '../components/PageHeader'
 import { Download, FileText, Search, X, FileSpreadsheet } from 'lucide-react'
@@ -335,7 +335,7 @@ export default function PriceLists() {
     XLSX.writeFile(wb, `Прайс-лист ПЧК ADDIS${suffix} ${today.replace(/\./g, '-')}.xlsx`)
   }
 
-  // ---- Новая клиентская выгрузка (на базе template_price.xlsx) ----
+  // ---- Новая клиентская выгрузка (на базе template_price.xlsx, через ExcelJS) ----
   async function exportClientPriceList() {
     setExportingClient(true)
     try {
@@ -344,21 +344,15 @@ export default function PriceLists() {
         throw new Error(`Шаблон недоступен (${res.status})`)
       }
       const buffer = await res.arrayBuffer()
-      // Читаем стандартным xlsx (xlsx-js-style.read падает на сложном шаблоне)
-      const wb = XLSX.read(buffer, {
-        type: 'array',
-        cellFormula: true,
-        cellStyles: true,
-      })
 
-      const sheetNames = wb.SheetNames || []
-      console.log('Листы в шаблоне:', sheetNames)
+      // Читаем через ExcelJS — он сохраняет все стили, объединения, page setup, формулы
+      const wb = new ExcelJS.Workbook()
+      await wb.xlsx.load(buffer)
 
-      const sheet = wb.Sheets['Прайс-лист']
+      const sheet = wb.getWorksheet('Прайс-лист')
       if (!sheet) {
-        throw new Error(
-          `В шаблоне нет листа «Прайс-лист». Найдены: ${sheetNames.join(', ') || '(нет)'}`
-        )
+        const names = wb.worksheets.map(w => w.name).join(', ')
+        throw new Error(`В шаблоне нет листа «Прайс-лист». Найдены: ${names || '(нет)'}`)
       }
 
       const exportRows = selCount > 0
@@ -367,67 +361,67 @@ export default function PriceLists() {
 
       const exportGroups = groupRows(exportRows)
 
-      const START_ROW = 11
-      let row = START_ROW
-
-      const headerStyle = {
-        font: { bold: true, color: { rgb: 'FF8B4513' }, sz: 11 },
-        fill: { patternType: 'solid', fgColor: { rgb: 'FFFFE4B5' } },
-        alignment: { horizontal: 'left', vertical: 'center' },
-      }
-
+      // Собираем плоский список SKU в порядке групп — без строк-разделителей,
+      // чтобы не ломать табличную структуру. Категория — в столбце A, клиент может
+      // фильтровать/сортировать через AutoFilter в шапке.
+      const flatSkus = []
       for (const group of exportGroups) {
-        // Строка-разделитель группы
-        const headerAddr = `A${row}`
-        sheet[headerAddr] = {
-          t: 's',
-          v: `${group.name.toUpperCase()} — ${group.rows.length} поз.`,
-          s: headerStyle,
-        }
-        // Заливка ячеек разделителя B..Q
-        for (let col = 1; col <= 16; col++) {
-          const addr = XLSX.utils.encode_cell({ r: row - 1, c: col })
-          if (!sheet[addr]) sheet[addr] = { t: 's', v: '' }
-          sheet[addr].s = { fill: { patternType: 'solid', fgColor: { rgb: 'FFFFE4B5' } } }
-        }
-        // Очищаем формулы R/S/T в строке-разделителе
-        ;['R', 'S', 'T'].forEach(col => {
-          const addr = `${col}${row}`
-          if (sheet[addr]) {
-            delete sheet[addr].f
-            sheet[addr].v = ''
-            sheet[addr].t = 's'
-          }
-        })
-        row++
-
-        // Строки SKU
         for (const sku of group.rows) {
-          const grams = normalizeGrams(sku.package_size, sku.package_unit)
-          const cost = Number(sku.total_sku_cost ?? 0)
-
-          sheet[`A${row}`] = { t: 's', v: group.name }
-          sheet[`B${row}`] = { t: 's', v: sku.sku_article ?? '' }
-          sheet[`C${row}`] = { t: 's', v: sku.product_name ?? '' }
-          sheet[`D${row}`] = { t: 's', v: descriptions[sku.sku_article] ?? '' }
-          sheet[`E${row}`] = { t: 'n', v: grams ?? 0 }
-          sheet[`F${row}`] = { t: 's', v: 'гр' }
-          sheet[`G${row}`] = { t: 'n', v: 1 }
-          sheet[`H${row}`] = { t: 'n', v: 1 }
-          sheet[`I${row}`] = { t: 'n', v: round2(cost * CLIENT_MARKUPS.basic) }
-          sheet[`J${row}`] = { t: 'n', v: round2(cost * CLIENT_MARKUPS.opt) }
-          sheet[`K${row}`] = { t: 'n', v: round2(cost * CLIENT_MARKUPS.optPlus) }
-          sheet[`L${row}`] = { t: 'n', v: round2(cost * CLIENT_MARKUPS.partner) }
-          sheet[`M${row}`] = { t: 'n', v: round2(cost * CLIENT_MARKUPS.keyPartner) }
-          sheet[`N${row}`] = { t: 's', v: 'В наличии' }
-          row++
+          flatSkus.push({ ...sku, categoryName: group.name })
         }
       }
 
+      const START_ROW = 11
+      const END_ROW = 310
+      const MAX_ROWS = END_ROW - START_ROW + 1
+
+      if (flatSkus.length > MAX_ROWS) {
+        console.warn(`SKU больше (${flatSkus.length}), чем места в шаблоне (${MAX_ROWS}). Лишние обрежутся.`)
+      }
+
+      // Заполняем строки. cell.value = X не затирает стиль ячейки в ExcelJS.
+      const fillCount = Math.min(flatSkus.length, MAX_ROWS)
+      for (let i = 0; i < fillCount; i++) {
+        const sku = flatSkus[i]
+        const row = START_ROW + i
+        const grams = normalizeGrams(sku.package_size, sku.package_unit)
+        const cost = Number(sku.total_sku_cost ?? 0)
+
+        sheet.getCell(`A${row}`).value = sku.categoryName
+        sheet.getCell(`B${row}`).value = sku.sku_article ?? ''
+        sheet.getCell(`C${row}`).value = sku.product_name ?? ''
+        sheet.getCell(`D${row}`).value = descriptions[sku.sku_article] ?? ''
+        sheet.getCell(`E${row}`).value = grams ?? 0
+        sheet.getCell(`F${row}`).value = 'гр'
+        sheet.getCell(`G${row}`).value = 1
+        sheet.getCell(`H${row}`).value = 1
+        sheet.getCell(`I${row}`).value = round2(cost * CLIENT_MARKUPS.basic)
+        sheet.getCell(`J${row}`).value = round2(cost * CLIENT_MARKUPS.opt)
+        sheet.getCell(`K${row}`).value = round2(cost * CLIENT_MARKUPS.optPlus)
+        sheet.getCell(`L${row}`).value = round2(cost * CLIENT_MARKUPS.partner)
+        sheet.getCell(`M${row}`).value = round2(cost * CLIENT_MARKUPS.keyPartner)
+        sheet.getCell(`N${row}`).value = 'В наличии'
+        // O, P, Q — пустые для клиента; R, S, T — формулы из шаблона (сохраняются).
+      }
+
+      // Сохраняем и скачиваем через Blob (ExcelJS возвращает ArrayBuffer)
+      const outBuffer = await wb.xlsx.writeBuffer()
+      const blob = new Blob([outBuffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      })
+      const url = URL.createObjectURL(blob)
       const today = new Date().toLocaleDateString('ru-RU').replace(/\./g, '-')
       const totalCount = exportRows.length
       const suffix = selCount > 0 ? ` (${totalCount} поз)` : ''
-      XLSXStyle.writeFile(wb, `Клиентский прайс-лист ПЧК${suffix} ${today}.xlsx`)
+      const fileName = `Клиентский прайс-лист ПЧК${suffix} ${today}.xlsx`
+
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
     } catch (err) {
       console.error('Ошибка выгрузки клиентского прайса:', err)
       alert(`Не удалось сформировать прайс: ${err.message}`)

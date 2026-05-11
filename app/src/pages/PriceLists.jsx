@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
+import * as XLSXStyle from 'xlsx-js-style'
 import { supabase } from '../lib/supabase'
 import PageHeader from '../components/PageHeader'
-import { Download, FileText, Search, X } from 'lucide-react'
+import { Download, FileText, Search, X, FileSpreadsheet } from 'lucide-react'
 
-// Ценовые уровни (наценка от себестоимости, включая НДС 22%)
+// ============================================================================
+// Старая выгрузка (плоский прайс с тирами по сумме заказа, цены с НДС)
+// ============================================================================
+
 const TIERS = [
   { label: 'до 50 000 руб.',       markup: 1.50 },
   { label: '50–100 000 руб.',      markup: 1.35 },
@@ -15,6 +19,18 @@ const VAT = 0.22
 
 function calcPrice(cost, markup) {
   return Math.round(Number(cost) * (1 + markup) * (1 + VAT) * 100) / 100
+}
+
+// ============================================================================
+// Новая клиентская выгрузка (B2B шаблон с 5 уровнями цен, НДС в бланке заказа)
+// ============================================================================
+
+const CLIENT_MARKUPS = {
+  basic:       2.70, // Базовый, +170%
+  opt:         2.50, // Опт, +150%
+  optPlus:     2.30, // Опт+, +130%
+  partner:     2.10, // Партнер, +110%
+  keyPartner:  1.95, // Ключевой партнер, +95%
 }
 
 const CATEGORY_SORT = {
@@ -44,6 +60,18 @@ function formatWeight(size, unit) {
   return `${size} ${unit}`
 }
 
+function normalizeGrams(size, unit) {
+  if (size === null || size === undefined) return null
+  const n = Number(size)
+  if (isNaN(n)) return null
+  if (unit === 'кг') return Math.round(n * 1000)
+  return Math.round(n)
+}
+
+function round2(n) {
+  return Math.round(Number(n) * 100) / 100
+}
+
 function fmt(val) {
   if (val == null) return '—'
   return Number(val).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -65,7 +93,6 @@ function Checkbox({ checked, indeterminate, onChange, className = '' }) {
   )
 }
 
-// Конвертация адреса ячейки из {r, c} в строку "A1"
 function cellAddr(r, c) {
   return XLSX.utils.encode_cell({ r, c })
 }
@@ -73,6 +100,7 @@ function cellAddr(r, c) {
 export default function PriceLists() {
   const [rows, setRows]             = useState([])
   const [loading, setLoading]       = useState(true)
+  const [exportingClient, setExportingClient] = useState(false)
   const [typeNames, setTypeNames]   = useState({})
   const [search, setSearch]         = useState('')
   const [selected, setSelected]     = useState(new Set())
@@ -225,6 +253,7 @@ export default function PriceLists() {
     })
   }
 
+  // ---- Старая выгрузка (плоский прайс с НДС) ----
   function exportToXls() {
     const today = new Date().toLocaleDateString('ru-RU')
     const exportRows = selCount > 0
@@ -232,8 +261,6 @@ export default function PriceLists() {
       : filteredRows
 
     const exportGroups = groupRows(exportRows)
-
-    // Индекс столбца «Описание» (0-based): №=0,Арт=1,Наим=2,Вес=3,T1=4,T2=5,T3=6,T4=7,Описание=8
     const DESC_COL = 8
 
     const sheetData = [
@@ -268,22 +295,14 @@ export default function PriceLists() {
 
     const ws = XLSX.utils.aoa_to_sheet(sheetData)
 
-    // Ширины столбцов (оптимизированы под A4 landscape)
     ws['!cols'] = [
-      { wch: 4  },  // №
-      { wch: 14 },  // Артикул
-      { wch: 32 },  // Наименование
-      { wch: 8  },  // Вес, гр.
-      { wch: 15 },  // Tier 1
-      { wch: 15 },  // Tier 2
-      { wch: 15 },  // Tier 3
-      { wch: 15 },  // Tier 4
-      { wch: 28 },  // Описание (сужен)
+      { wch: 4  }, { wch: 14 }, { wch: 32 }, { wch: 8  },
+      { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 },
+      { wch: 28 },
     ]
 
-    // A4 landscape, подогнать по ширине на 1 страницу
     ws['!pageSetup'] = {
-      paperSize: 9,          // 9 = A4
+      paperSize: 9,
       orientation: 'landscape',
       fitToPage: true,
       fitToWidth: 1,
@@ -296,7 +315,6 @@ export default function PriceLists() {
       header: 0.2, footer: 0.2,
     }
 
-    // Левое выравнивание + перенос текста для всех ячеек столбца «Описание»
     const range = XLSX.utils.decode_range(ws['!ref'] ?? 'A1')
     for (let R = range.s.r; R <= range.e.r; R++) {
       const addr = cellAddr(R, DESC_COL)
@@ -317,6 +335,107 @@ export default function PriceLists() {
     XLSX.writeFile(wb, `Прайс-лист ПЧК ADDIS${suffix} ${today.replace(/\./g, '-')}.xlsx`)
   }
 
+  // ---- Новая клиентская выгрузка (на базе template_price.xlsx) ----
+  async function exportClientPriceList() {
+    setExportingClient(true)
+    try {
+      const res = await fetch('/template_price.xlsx')
+      if (!res.ok) {
+        throw new Error(`Шаблон недоступен (${res.status})`)
+      }
+      const buffer = await res.arrayBuffer()
+      // Читаем стандартным xlsx (xlsx-js-style.read падает на сложном шаблоне)
+      const wb = XLSX.read(buffer, {
+        type: 'array',
+        cellFormula: true,
+        cellStyles: true,
+      })
+
+      const sheetNames = wb.SheetNames || []
+      console.log('Листы в шаблоне:', sheetNames)
+
+      const sheet = wb.Sheets['Прайс-лист']
+      if (!sheet) {
+        throw new Error(
+          `В шаблоне нет листа «Прайс-лист». Найдены: ${sheetNames.join(', ') || '(нет)'}`
+        )
+      }
+
+      const exportRows = selCount > 0
+        ? filteredRows.filter(r => selected.has(r.sku_article))
+        : filteredRows
+
+      const exportGroups = groupRows(exportRows)
+
+      const START_ROW = 11
+      let row = START_ROW
+
+      const headerStyle = {
+        font: { bold: true, color: { rgb: 'FF8B4513' }, sz: 11 },
+        fill: { patternType: 'solid', fgColor: { rgb: 'FFFFE4B5' } },
+        alignment: { horizontal: 'left', vertical: 'center' },
+      }
+
+      for (const group of exportGroups) {
+        // Строка-разделитель группы
+        const headerAddr = `A${row}`
+        sheet[headerAddr] = {
+          t: 's',
+          v: `${group.name.toUpperCase()} — ${group.rows.length} поз.`,
+          s: headerStyle,
+        }
+        // Заливка ячеек разделителя B..Q
+        for (let col = 1; col <= 16; col++) {
+          const addr = XLSX.utils.encode_cell({ r: row - 1, c: col })
+          if (!sheet[addr]) sheet[addr] = { t: 's', v: '' }
+          sheet[addr].s = { fill: { patternType: 'solid', fgColor: { rgb: 'FFFFE4B5' } } }
+        }
+        // Очищаем формулы R/S/T в строке-разделителе
+        ;['R', 'S', 'T'].forEach(col => {
+          const addr = `${col}${row}`
+          if (sheet[addr]) {
+            delete sheet[addr].f
+            sheet[addr].v = ''
+            sheet[addr].t = 's'
+          }
+        })
+        row++
+
+        // Строки SKU
+        for (const sku of group.rows) {
+          const grams = normalizeGrams(sku.package_size, sku.package_unit)
+          const cost = Number(sku.total_sku_cost ?? 0)
+
+          sheet[`A${row}`] = { t: 's', v: group.name }
+          sheet[`B${row}`] = { t: 's', v: sku.sku_article ?? '' }
+          sheet[`C${row}`] = { t: 's', v: sku.product_name ?? '' }
+          sheet[`D${row}`] = { t: 's', v: descriptions[sku.sku_article] ?? '' }
+          sheet[`E${row}`] = { t: 'n', v: grams ?? 0 }
+          sheet[`F${row}`] = { t: 's', v: 'гр' }
+          sheet[`G${row}`] = { t: 'n', v: 1 }
+          sheet[`H${row}`] = { t: 'n', v: 1 }
+          sheet[`I${row}`] = { t: 'n', v: round2(cost * CLIENT_MARKUPS.basic) }
+          sheet[`J${row}`] = { t: 'n', v: round2(cost * CLIENT_MARKUPS.opt) }
+          sheet[`K${row}`] = { t: 'n', v: round2(cost * CLIENT_MARKUPS.optPlus) }
+          sheet[`L${row}`] = { t: 'n', v: round2(cost * CLIENT_MARKUPS.partner) }
+          sheet[`M${row}`] = { t: 'n', v: round2(cost * CLIENT_MARKUPS.keyPartner) }
+          sheet[`N${row}`] = { t: 's', v: 'В наличии' }
+          row++
+        }
+      }
+
+      const today = new Date().toLocaleDateString('ru-RU').replace(/\./g, '-')
+      const totalCount = exportRows.length
+      const suffix = selCount > 0 ? ` (${totalCount} поз)` : ''
+      XLSXStyle.writeFile(wb, `Клиентский прайс-лист ПЧК${suffix} ${today}.xlsx`)
+    } catch (err) {
+      console.error('Ошибка выгрузки клиентского прайса:', err)
+      alert(`Не удалось сформировать прайс: ${err.message}`)
+    } finally {
+      setExportingClient(false)
+    }
+  }
+
   return (
     <div className="p-8">
       <PageHeader
@@ -330,7 +449,6 @@ export default function PriceLists() {
         }
       />
 
-      {/* Панель инструментов */}
       <div className="flex items-center gap-3 mb-6">
         <div className="relative flex-1 max-w-sm">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
@@ -367,9 +485,27 @@ export default function PriceLists() {
                      bg-gold/10 text-gold text-xs font-body font-medium
                      hover:bg-gold/20 hover:border-gold/50 transition-colors whitespace-nowrap
                      disabled:opacity-40 disabled:cursor-not-allowed"
+          title="Простой прайс с тирами по сумме заказа (цены с НДС)"
         >
           <Download size={14} />
           {selCount > 0 ? `Выгрузить (${selCount})` : 'Выгрузить прайс-лист'}
+        </button>
+
+        <button
+          onClick={exportClientPriceList}
+          disabled={loading || exportingClient || rows.length === 0}
+          className="flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-500/40
+                     bg-emerald-500/10 text-emerald-300 text-xs font-body font-medium
+                     hover:bg-emerald-500/20 hover:border-emerald-500/60 transition-colors whitespace-nowrap
+                     disabled:opacity-40 disabled:cursor-not-allowed"
+          title="B2B прайс с 5 уровнями цен и автогенерацией бланка заказа"
+        >
+          <FileSpreadsheet size={14} />
+          {exportingClient
+            ? 'Готовится…'
+            : selCount > 0
+              ? `Клиентский прайс (${selCount})`
+              : 'Клиентский прайс-лист'}
         </button>
       </div>
 

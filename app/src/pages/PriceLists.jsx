@@ -6,32 +6,24 @@ import PageHeader from '../components/PageHeader'
 import { Download, FileText, Search, X, FileSpreadsheet } from 'lucide-react'
 
 // ============================================================================
-// Старая выгрузка (плоский прайс с тирами по сумме заказа, цены с НДС)
+// Уровни клиентских цен (единый источник истины для всех выгрузок).
+// Цены БЕЗ НДС — НДС добавляется в бланке заказа отдельно.
+// markup = итоговый коэффициент к себестоимости (cost × markup).
 // ============================================================================
 
 const TIERS = [
-  { label: 'до 50 000 руб.',       markup: 1.50 },
-  { label: '50–100 000 руб.',      markup: 1.35 },
-  { label: '100–400 000 руб.',     markup: 1.20 },
-  { label: 'от 400 000 руб.',      markup: 1.05 },
+  { key: 'basic',      label: 'Базовый',          markup: 2.70 }, // +170%
+  { key: 'opt',        label: 'Опт',              markup: 2.50 }, // +150%
+  { key: 'optPlus',    label: 'Опт+',             markup: 2.30 }, // +130%
+  { key: 'partner',    label: 'Партнер',          markup: 2.10 }, // +110%
+  { key: 'keyPartner', label: 'Ключевой партнер', markup: 1.95 }, // +95%
 ]
-const VAT = 0.22
 
 function calcPrice(cost, markup) {
-  return Math.round(Number(cost) * (1 + markup) * (1 + VAT) * 100) / 100
+  return Math.round(Number(cost) * markup * 100) / 100
 }
 
 // ============================================================================
-// Новая клиентская выгрузка (B2B шаблон с 5 уровнями цен, НДС в бланке заказа)
-// ============================================================================
-
-const CLIENT_MARKUPS = {
-  basic:       2.70, // Базовый, +170%
-  opt:         2.50, // Опт, +150%
-  optPlus:     2.30, // Опт+, +130%
-  partner:     2.10, // Партнер, +110%
-  keyPartner:  1.95, // Ключевой партнер, +95%
-}
 
 const CATEGORY_SORT = {
   28: 10, 37: 11, 38: 12,
@@ -66,10 +58,6 @@ function normalizeGrams(size, unit) {
   if (isNaN(n)) return null
   if (unit === 'кг') return Math.round(n * 1000)
   return Math.round(n)
-}
-
-function round2(n) {
-  return Math.round(Number(n) * 100) / 100
 }
 
 function fmt(val) {
@@ -253,7 +241,7 @@ export default function PriceLists() {
     })
   }
 
-  // ---- Старая выгрузка (плоский прайс с НДС) ----
+  // ---- Простая выгрузка (плоский прайс с 5 клиентскими уровнями, без НДС) ----
   function exportToXls() {
     const today = new Date().toLocaleDateString('ru-RU')
     const exportRows = selCount > 0
@@ -261,12 +249,13 @@ export default function PriceLists() {
       : filteredRows
 
     const exportGroups = groupRows(exportRows)
-    const DESC_COL = 8
+    // Описание идёт после колонок: №, Артикул, Наим., Вес + N тиров
+    const DESC_COL = 4 + TIERS.length
 
     const sheetData = [
       ['Прайс-лист ПЧК/ADDIS'],
       [`Дата выгрузки: ${today}`],
-      ['Все цены указаны с НДС 22%'],
+      ['Цены без НДС, по уровням клиентов'],
       [],
     ]
 
@@ -297,7 +286,7 @@ export default function PriceLists() {
 
     ws['!cols'] = [
       { wch: 4  }, { wch: 14 }, { wch: 32 }, { wch: 8  },
-      { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 },
+      { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 18 },
       { wch: 28 },
     ]
 
@@ -335,7 +324,7 @@ export default function PriceLists() {
     XLSX.writeFile(wb, `Прайс-лист ПЧК ADDIS${suffix} ${today.replace(/\./g, '-')}.xlsx`)
   }
 
-  // ---- Новая клиентская выгрузка (на базе template_price.xlsx, через ExcelJS) ----
+  // ---- Клиентский прайс (на базе template_price.xlsx, через ExcelJS) ----
   async function exportClientPriceList() {
     setExportingClient(true)
     try {
@@ -379,6 +368,9 @@ export default function PriceLists() {
         console.warn(`SKU больше (${flatSkus.length}), чем места в шаблоне (${MAX_ROWS}). Лишние обрежутся.`)
       }
 
+      // Колонки I..M соответствуют 5 уровням TIERS по порядку
+      const PRICE_COLS = ['I', 'J', 'K', 'L', 'M']
+
       // Заполняем строки. cell.value = X не затирает стиль ячейки в ExcelJS.
       const fillCount = Math.min(flatSkus.length, MAX_ROWS)
       for (let i = 0; i < fillCount; i++) {
@@ -395,11 +387,10 @@ export default function PriceLists() {
         sheet.getCell(`F${row}`).value = 'гр'
         sheet.getCell(`G${row}`).value = 1
         sheet.getCell(`H${row}`).value = 1
-        sheet.getCell(`I${row}`).value = round2(cost * CLIENT_MARKUPS.basic)
-        sheet.getCell(`J${row}`).value = round2(cost * CLIENT_MARKUPS.opt)
-        sheet.getCell(`K${row}`).value = round2(cost * CLIENT_MARKUPS.optPlus)
-        sheet.getCell(`L${row}`).value = round2(cost * CLIENT_MARKUPS.partner)
-        sheet.getCell(`M${row}`).value = round2(cost * CLIENT_MARKUPS.keyPartner)
+        // Цены по 5 уровням TIERS (единый источник истины)
+        TIERS.forEach((t, ti) => {
+          sheet.getCell(`${PRICE_COLS[ti]}${row}`).value = calcPrice(cost, t.markup)
+        })
         sheet.getCell(`N${row}`).value = 'В наличии'
         // O, P, Q — пустые для клиента; R, S, T — формулы из шаблона (сохраняются).
       }
@@ -434,7 +425,7 @@ export default function PriceLists() {
     <div className="p-8">
       <PageHeader
         title="ПРАЙС ЛИСТ"
-        subtitle="Цены с НДС 22%, сгруппированы по видам чая"
+        subtitle="Цены без НДС, по уровням клиентов"
         action={
           <div className="flex items-center gap-2 text-muted text-xs font-body">
             <FileText size={14} />
@@ -479,7 +470,7 @@ export default function PriceLists() {
                      bg-gold/10 text-gold text-xs font-body font-medium
                      hover:bg-gold/20 hover:border-gold/50 transition-colors whitespace-nowrap
                      disabled:opacity-40 disabled:cursor-not-allowed"
-          title="Простой прайс с тирами по сумме заказа (цены с НДС)"
+          title="Плоский прайс с 5 уровнями клиентских цен (без НДС)"
         >
           <Download size={14} />
           {selCount > 0 ? `Выгрузить (${selCount})` : 'Выгрузить прайс-лист'}
@@ -527,7 +518,7 @@ export default function PriceLists() {
                   <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-3">Наименование</th>
                   <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-4 py-3">Вес, гр.</th>
                   {TIERS.map(t => (
-                    <th key={t.label} className="text-gold text-xs uppercase tracking-widest font-body text-right px-4 py-3 whitespace-nowrap">
+                    <th key={t.key} className="text-gold text-xs uppercase tracking-widest font-body text-right px-4 py-3 whitespace-nowrap">
                       {t.label}
                     </th>
                   ))}
@@ -601,7 +592,7 @@ export default function PriceLists() {
                               {formatWeight(item.package_size, item.package_unit)}
                             </td>
                             {TIERS.map((t, ti) => (
-                              <td key={ti} className={`px-4 py-2.5 font-mono text-right whitespace-nowrap ${ti === 0 ? 'text-gold font-medium' : 'text-gold/70'}`}>
+                              <td key={t.key} className={`px-4 py-2.5 font-mono text-right whitespace-nowrap ${ti === 0 ? 'text-gold font-medium' : 'text-gold/70'}`}>
                                 {fmt(calcPrice(item.total_sku_cost, t.markup))}
                               </td>
                             ))}

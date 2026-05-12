@@ -365,15 +365,20 @@ export default function MaterialsImport() {
               </thead>
               <tbody>
                 {[...foundRows, ...notFoundRows].map((r, i) => (
-                  <tr key={i} className={!r.found ? 'opacity-40' : ''}>
+                  <tr key={i} className={!r.found ? 'opacity-60' : ''}>
                     <td className="p-4 border-t border-forest-light/20">
                       <span className="badge bg-forest-light text-cream border border-forest-light font-mono text-xs">{r.article}</span>
                     </td>
                     <td className="p-4 border-t border-forest-light/20 text-xs font-body">
                       {!r.found ? (
-                        <span className="flex items-center gap-1 text-amber-400">
-                          <AlertTriangle size={12} /> не найден в базе
-                        </span>
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1 text-amber-400">
+                            <AlertTriangle size={12} /> не найден в базе
+                          </div>
+                          {r.xlsName && (
+                            <div className="text-cream/70 text-xs pl-4">{r.xlsName}</div>
+                          )}
+                        </div>
                       ) : r.nameConflict ? (
                         <span>
                           <span className={r.keepNewName ? 'text-muted line-through' : 'text-cream'}>{r.dbName}</span>

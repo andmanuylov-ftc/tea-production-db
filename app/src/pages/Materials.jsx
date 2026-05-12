@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import PageHeader from '../components/PageHeader'
 import {
   Search, Pencil, Trash2, X, Check, Clock, MoreHorizontal, Upload,
-  Eye, FlaskConical, Package, ExternalLink, ArrowRight,
+  Eye, FlaskConical, Package, ExternalLink, TrendingUp, TrendingDown, Minus,
 } from 'lucide-react'
 
 // нормализация в кг (для расчёта долей в рецептах, где output_unit обычно 'кг')
@@ -31,6 +31,13 @@ function fmtShare(n) {
   return n.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%'
 }
 
+// % изменения текущей цены относительно предыдущей по времени
+function priceChangePct(curr, prev) {
+  const c = Number(curr), p = Number(prev)
+  if (!p || isNaN(c) || isNaN(p)) return null
+  return ((c - p) / p) * 100
+}
+
 export default function Materials() {
   const navigate = useNavigate()
   const [rows, setRows]               = useState([])
@@ -46,9 +53,11 @@ export default function Materials() {
   const [saving, setSaving]           = useState(false)
 
   // usage panel
-  const [usageRow, setUsageRow]         = useState(null)
-  const [usage, setUsage]               = useState(null)
-  const [loadingUsage, setLoadingUsage] = useState(false)
+  const [usageRow, setUsageRow]               = useState(null)
+  const [usage, setUsage]                     = useState(null)
+  const [loadingUsage, setLoadingUsage]       = useState(false)
+  const [usageHistory, setUsageHistory]       = useState([])
+  const [usageHistLoading, setUsageHistLoading] = useState(false)
 
   // row menu
   const [confirmId, setConfirmId]     = useState(null)
@@ -80,23 +89,28 @@ export default function Materials() {
     if (mounted.current) { setRows(data ?? []); setLoading(false) }
   }
 
+  async function loadPriceHistory(materialId) {
+    const { data } = await supabase
+      .from('material_prices')
+      .select('price_per_unit, valid_from')
+      .eq('material_id', materialId)
+      .order('valid_from', { ascending: false })
+      .limit(3)
+    return data ?? []
+  }
+
   // ───── Edit panel ─────
 
   async function openEdit(row) {
     setOpenMenuId(null)
-    setUsageRow(null); setUsage(null) // закрываем usage если было
+    setUsageRow(null); setUsage(null); setUsageHistory([]) // закрываем usage если было
     setEditRow(row)
     setEditName(row.name)
     setEditPrice('')
     setHistory([])
     setHistLoading(true)
-    const { data } = await supabase
-      .from('material_prices')
-      .select('price_per_unit, valid_from')
-      .eq('material_id', row.id)
-      .order('valid_from', { ascending: false })
-      .limit(3)
-    if (mounted.current) { setHistory(data ?? []); setHistLoading(false) }
+    const h = await loadPriceHistory(row.id)
+    if (mounted.current) { setHistory(h); setHistLoading(false) }
   }
 
   async function saveEdit() {
@@ -124,7 +138,7 @@ export default function Materials() {
     setConfirmId(null)
     setOpenMenuId(null)
     setRows(prev => prev.filter(r => r.id !== id))
-    if (usageRow?.id === id) { setUsageRow(null); setUsage(null) }
+    if (usageRow?.id === id) { setUsageRow(null); setUsage(null); setUsageHistory([]) }
     if (editRow?.id === id) setEditRow(null)
   }
 
@@ -135,7 +149,14 @@ export default function Materials() {
     setEditRow(null) // закрываем edit
     setUsageRow(row)
     setUsage(null)
+    setUsageHistory([])
     setLoadingUsage(true)
+    setUsageHistLoading(true)
+
+    // История цен — параллельно с расчётом usage
+    loadPriceHistory(row.id).then(h => {
+      if (mounted.current) { setUsageHistory(h); setUsageHistLoading(false) }
+    })
 
     const matId = row.id
 
@@ -489,24 +510,7 @@ export default function Materials() {
             </div>
 
             <div className="mb-5">
-              <div className="flex items-center gap-2 mb-2">
-                <Clock size={13} className="text-muted" />
-                <span className="text-muted text-xs font-body uppercase tracking-widest">
-                  История цен — последние 3 даты
-                </span>
-              </div>
-              {histLoading ? (
-                <p className="text-muted text-xs font-mono animate-pulse">Загрузка...</p>
-              ) : history.length === 0 ? (
-                <p className="text-muted text-xs font-body">Цен не найдено</p>
-              ) : history.map((h, i) => (
-                <div key={i} className="flex justify-between items-center py-2 border-b border-forest-light/30">
-                  <span className="text-muted text-xs font-mono">{fmtDate(h.valid_from)}</span>
-                  <span className={`font-mono text-xs ${i === 0 ? 'text-gold font-semibold' : 'text-muted'}`}>
-                    {fmt(h.price_per_unit)} руб.
-                  </span>
-                </div>
-              ))}
+              <PriceHistoryBlock history={history} loading={histLoading} />
             </div>
 
             <button
@@ -525,7 +529,7 @@ export default function Materials() {
           <div className="w-96 flex-shrink-0 card overflow-y-auto max-h-[calc(100vh-10rem)]">
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-display text-sm font-semibold text-cream">Где используется</h3>
-              <button onClick={() => { setUsageRow(null); setUsage(null) }} className="text-muted hover:text-cream transition-colors">
+              <button onClick={() => { setUsageRow(null); setUsage(null); setUsageHistory([]) }} className="text-muted hover:text-cream transition-colors">
                 <X size={16} />
               </button>
             </div>
@@ -535,6 +539,11 @@ export default function Materials() {
                 {usageRow.article}
               </span>
               <span className="text-cream text-xs font-body">{usageRow.name}</span>
+            </div>
+
+            {/* История цен — сверху */}
+            <div className="mb-5 pb-5 border-b border-forest-light/30">
+              <PriceHistoryBlock history={usageHistory} loading={usageHistLoading} />
             </div>
 
             {loadingUsage ? (
@@ -627,6 +636,64 @@ export default function Materials() {
 }
 
 // ───── Helpers ─────
+
+function PriceHistoryBlock({ history, loading }) {
+  return (
+    <>
+      <div className="flex items-center gap-2 mb-2">
+        <Clock size={13} className="text-muted" />
+        <span className="text-muted text-xs font-body uppercase tracking-widest">
+          История цен — последние 3
+        </span>
+      </div>
+      {loading ? (
+        <p className="text-muted text-xs font-mono animate-pulse">Загрузка...</p>
+      ) : history.length === 0 ? (
+        <p className="text-muted text-xs font-body">Цен не найдено</p>
+      ) : history.map((h, i) => {
+        const prev    = history[i + 1] // следующая по индексу = более ранняя по времени
+        const pct     = prev ? priceChangePct(h.price_per_unit, prev.price_per_unit) : null
+        const isCurr  = i === 0
+
+        let badge = null
+        if (pct != null) {
+          const abs = Math.abs(pct)
+          if (abs < 0.005) {
+            badge = (
+              <span className="flex items-center gap-0.5 text-muted/70 font-mono text-[10px]">
+                <Minus size={10} /> 0%
+              </span>
+            )
+          } else if (pct > 0) {
+            badge = (
+              <span className="flex items-center gap-0.5 text-red-400 font-mono text-[10px]">
+                <TrendingUp size={10} /> +{abs.toFixed(abs < 10 ? 2 : 1)}%
+              </span>
+            )
+          } else {
+            badge = (
+              <span className="flex items-center gap-0.5 text-emerald-400 font-mono text-[10px]">
+                <TrendingDown size={10} /> −{abs.toFixed(abs < 10 ? 2 : 1)}%
+              </span>
+            )
+          }
+        }
+
+        return (
+          <div key={i} className="flex justify-between items-center py-2 border-b border-forest-light/30 last:border-b-0">
+            <div className="flex items-center gap-2">
+              <span className="text-muted text-xs font-mono">{fmtDate(h.valid_from)}</span>
+              {badge}
+            </div>
+            <span className={`font-mono text-xs ${isCurr ? 'text-gold font-semibold' : 'text-muted'}`}>
+              {fmt(h.price_per_unit)} ₽
+            </span>
+          </div>
+        )
+      })}
+    </>
+  )
+}
 
 function UsageSection({ icon: Icon, iconColor, title, count, empty, children }) {
   return (

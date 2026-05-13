@@ -7,8 +7,10 @@ import { Download, FileText, Search, X, FileSpreadsheet } from 'lucide-react'
 
 // ============================================================================
 // Уровни клиентских цен (единый источник истины для всех выгрузок).
-// Цены БЕЗ НДС — НДС добавляется в бланке заказа отдельно.
 // markup = итоговый коэффициент к себестоимости (cost × markup).
+// НДС: экран и кнопка «Выгрузить прайс-лист» отображают цены С НДС (×1.22).
+// Кнопка «Клиентский прайс-лист» записывает в столбцы I–M цены БЕЗ НДС,
+// а столбец T «Сумма с НДС» считается формулой шаблона.
 // ============================================================================
 
 const TIERS = [
@@ -21,6 +23,14 @@ const TIERS = [
 
 function calcPrice(cost, markup) {
   return Math.round(Number(cost) * markup * 100) / 100
+}
+
+// Ставка НДС для выгрузки «Выгрузить прайс-лист» (плоский xlsx).
+// Кнопка «Клиентский прайс-лист» НДС считает формулой шаблона — этот множитель её не касается.
+const VAT_RATE = 1.22 // 22%
+
+function calcPriceWithVat(cost, markup) {
+  return Math.round(Number(cost) * markup * VAT_RATE * 100) / 100
 }
 
 // ============================================================================
@@ -241,7 +251,7 @@ export default function PriceLists() {
     })
   }
 
-  // ---- Простая выгрузка (плоский прайс с 5 клиентскими уровнями, без НДС) ----
+  // ---- Простая выгрузка (плоский прайс с 5 клиентскими уровнями, с НДС 22%) ----
   function exportToXls() {
     const today = new Date().toLocaleDateString('ru-RU')
     const exportRows = selCount > 0
@@ -255,7 +265,7 @@ export default function PriceLists() {
     const sheetData = [
       ['Прайс-лист ПЧК/ADDIS'],
       [`Дата выгрузки: ${today}`],
-      ['Цены без НДС, по уровням клиентов'],
+      ['Цены с НДС 22%, по уровням клиентов'],
       [],
     ]
 
@@ -274,7 +284,7 @@ export default function PriceLists() {
           item.sku_article ?? '—',
           item.product_name ?? '—',
           formatWeight(item.package_size, item.package_unit),
-          ...TIERS.map(t => calcPrice(item.total_sku_cost, t.markup)),
+          ...TIERS.map(t => calcPriceWithVat(item.total_sku_cost, t.markup)),
           descriptions[item.sku_article] ?? '',
         ])
       })
@@ -321,7 +331,7 @@ export default function PriceLists() {
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Прайс-лист')
     const suffix = selCount > 0 ? ` (${selCount} поз)` : ''
-    XLSX.writeFile(wb, `Прайс-лист ПЧК ADDIS${suffix} ${today.replace(/\./g, '-')}.xlsx`)
+    XLSX.writeFile(wb, `Прайс-лист ПЧК ADDIS с НДС${suffix} ${today.replace(/\./g, '-')}.xlsx`)
   }
 
   // ---- Клиентский прайс (на базе template_price.xlsx, через ExcelJS) ----
@@ -425,7 +435,7 @@ export default function PriceLists() {
     <div className="p-8">
       <PageHeader
         title="ПРАЙС ЛИСТ"
-        subtitle="Цены без НДС, по уровням клиентов"
+        subtitle="Цены с НДС 22%, по уровням клиентов"
         action={
           <div className="flex items-center gap-2 text-muted text-xs font-body">
             <FileText size={14} />
@@ -470,7 +480,7 @@ export default function PriceLists() {
                      bg-gold/10 text-gold text-xs font-body font-medium
                      hover:bg-gold/20 hover:border-gold/50 transition-colors whitespace-nowrap
                      disabled:opacity-40 disabled:cursor-not-allowed"
-          title="Плоский прайс с 5 уровнями клиентских цен (без НДС)"
+          title="Плоский прайс с 5 уровнями клиентских цен (с НДС 22%)"
         >
           <Download size={14} />
           {selCount > 0 ? `Выгрузить (${selCount})` : 'Выгрузить прайс-лист'}
@@ -593,7 +603,7 @@ export default function PriceLists() {
                             </td>
                             {TIERS.map((t, ti) => (
                               <td key={t.key} className={`px-4 py-2.5 font-mono text-right whitespace-nowrap ${ti === 0 ? 'text-gold font-medium' : 'text-gold/70'}`}>
-                                {fmt(calcPrice(item.total_sku_cost, t.markup))}
+                                {fmt(calcPriceWithVat(item.total_sku_cost, t.markup))}
                               </td>
                             ))}
                             <td className="px-4 py-2.5 text-xs max-w-xs">

@@ -21,38 +21,54 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     let mounted = true
 
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (!mounted) return
-      if (session?.user) {
-        const prof = await loadProfile(session.user.id)
-        if (!prof) {
-          await supabase.auth.signOut()
-          setUser(null)
-          setProfile(null)
-        } else {
-          setUser(session.user)
-          setProfile(prof)
+    // Первичная проверка сессии. getSession() освобождает auth-lock к моменту, когда
+    // выполняется .then(), поэтому загружать профиль внутри безопасно.
+    supabase.auth.getSession()
+      .then(async ({ data: { session } }) => {
+        if (!mounted) return
+        if (session?.user) {
+          const prof = await loadProfile(session.user.id)
+          if (!mounted) return
+          if (!prof) {
+            await supabase.auth.signOut()
+            setUser(null)
+            setProfile(null)
+          } else {
+            setUser(session.user)
+            setProfile(prof)
+          }
         }
-      }
-      setLoading(false)
-    })
+        setLoading(false)
+      })
+      .catch((err) => {
+        console.error('Ошибка getSession:', err)
+        if (mounted) setLoading(false)
+      })
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    // ВАЖНО: коллбэк onAuthStateChange — синхронный (НЕ async).
+    // Любые supabase-запросы внутри оборачиваем в setTimeout(0), иначе deadlock:
+    // gotrue держит lock, пока коллбэк не вернётся, а запрос внутри ждёт этот lock.
+    // https://supabase.com/docs/reference/javascript/auth-onauthstatechange
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!mounted) return
-      if (session?.user) {
-        const prof = await loadProfile(session.user.id)
-        if (!prof) {
-          await supabase.auth.signOut()
+      setTimeout(async () => {
+        if (!mounted) return
+        if (session?.user) {
+          const prof = await loadProfile(session.user.id)
+          if (!mounted) return
+          if (!prof) {
+            await supabase.auth.signOut()
+            setUser(null)
+            setProfile(null)
+          } else {
+            setUser(session.user)
+            setProfile(prof)
+          }
+        } else {
           setUser(null)
           setProfile(null)
-        } else {
-          setUser(session.user)
-          setProfile(prof)
         }
-      } else {
-        setUser(null)
-        setProfile(null)
-      }
+      }, 0)
     })
 
     return () => {

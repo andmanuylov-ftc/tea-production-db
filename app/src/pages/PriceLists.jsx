@@ -102,6 +102,7 @@ export default function PriceLists() {
   const [typeNames, setTypeNames]   = useState({})
   const [search, setSearch]         = useState('')
   const [selected, setSelected]     = useState(new Set())
+  const [needsCheck, setNeedsCheck] = useState(new Set())
   const [descriptions, setDescriptions] = useState({})
   const mounted = useRef(true)
 
@@ -221,6 +222,11 @@ export default function PriceLists() {
   const someVisible = filteredRows.some(r => selected.has(r.sku_article))
   const selCount = selected.size
 
+  // Сводный статус галочек «Уточнить наличие» — для чекбокса в шапке колонки
+  const allNeedsCheckVisible  = filteredRows.length > 0 && filteredRows.every(r => needsCheck.has(r.sku_article))
+  const someNeedsCheckVisible = filteredRows.some(r => needsCheck.has(r.sku_article))
+  const needsCheckCount       = needsCheck.size
+
   function toggleRow(key) {
     setSelected(prev => {
       const s = new Set(prev)
@@ -242,6 +248,38 @@ export default function PriceLists() {
 
   function toggleAll() {
     setSelected(prev => {
+      const s = new Set(prev)
+      const keys = filteredRows.map(r => r.sku_article)
+      const allOn = keys.every(k => s.has(k))
+      if (allOn) keys.forEach(k => s.delete(k))
+      else       keys.forEach(k => s.add(k))
+      return s
+    })
+  }
+
+  // -------- «Уточнить наличие» — отдельный набор галочек --------
+
+  function toggleNeedsCheck(key) {
+    setNeedsCheck(prev => {
+      const s = new Set(prev)
+      s.has(key) ? s.delete(key) : s.add(key)
+      return s
+    })
+  }
+
+  function toggleNeedsCheckGroup(groupRows) {
+    setNeedsCheck(prev => {
+      const s = new Set(prev)
+      const keys = groupRows.map(r => r.sku_article)
+      const allOn = keys.every(k => s.has(k))
+      if (allOn) keys.forEach(k => s.delete(k))
+      else       keys.forEach(k => s.add(k))
+      return s
+    })
+  }
+
+  function toggleNeedsCheckAll() {
+    setNeedsCheck(prev => {
       const s = new Set(prev)
       const keys = filteredRows.map(r => r.sku_article)
       const allOn = keys.every(k => s.has(k))
@@ -401,7 +439,11 @@ export default function PriceLists() {
         TIERS.forEach((t, ti) => {
           sheet.getCell(`${PRICE_COLS[ti]}${row}`).value = calcPrice(cost, t.markup)
         })
-        sheet.getCell(`N${row}`).value = 'В наличии'
+        // Статус наличия: «Уточнить наличие» — если SKU отмечен галочкой на странице,
+        // иначе по умолчанию «В наличии».
+        sheet.getCell(`N${row}`).value = needsCheck.has(sku.sku_article)
+          ? 'Уточнить наличие'
+          : 'В наличии'
         // O, P, Q — пустые для клиента; R, S, T — формулы из шаблона (сохраняются).
       }
 
@@ -473,6 +515,16 @@ export default function PriceLists() {
           </div>
         )}
 
+        {needsCheckCount > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-amber-300 text-xs font-mono">{needsCheckCount} уточн.</span>
+            <button onClick={() => setNeedsCheck(new Set())}
+              className="text-muted hover:text-cream transition-colors" title="Сбросить «Уточнить наличие»">
+              <X size={13} />
+            </button>
+          </div>
+        )}
+
         <button
           onClick={exportToXls}
           disabled={loading || rows.length === 0}
@@ -527,6 +579,19 @@ export default function PriceLists() {
                   <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-3">Артикул</th>
                   <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-3">Наименование</th>
                   <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-4 py-3">Вес, гр.</th>
+                  <th
+                    className="text-amber-300 text-xs uppercase tracking-widest font-body text-center px-3 py-3 w-20 whitespace-nowrap"
+                    title="«Уточнить наличие» — отмеченные SKU попадут в клиентский прайс со статусом «Уточнить наличие» вместо «В наличии»"
+                  >
+                    <div className="flex flex-col items-center gap-1">
+                      <span>Уточн.</span>
+                      <Checkbox
+                        checked={allNeedsCheckVisible}
+                        indeterminate={!allNeedsCheckVisible && someNeedsCheckVisible}
+                        onChange={toggleNeedsCheckAll}
+                      />
+                    </div>
+                  </th>
                   {TIERS.map(t => (
                     <th key={t.key} className="text-gold text-xs uppercase tracking-widest font-body text-right px-4 py-3 whitespace-nowrap">
                       {t.label}
@@ -539,6 +604,8 @@ export default function PriceLists() {
                 {groups.map(group => {
                   const groupAllOn  = group.rows.every(r => selected.has(r.sku_article))
                   const groupSomeOn = group.rows.some(r => selected.has(r.sku_article))
+                  const groupNcAllOn  = group.rows.every(r => needsCheck.has(r.sku_article))
+                  const groupNcSomeOn = group.rows.some(r => needsCheck.has(r.sku_article))
                   const groupOffset = groups
                     .slice(0, groups.indexOf(group))
                     .reduce((acc, g) => acc + g.rows.length, 0)
@@ -554,7 +621,7 @@ export default function PriceLists() {
                             onChange={() => toggleGroup(group.rows)}
                           />
                         </td>
-                        <td colSpan={4 + TIERS.length + 1} className="px-2 py-2.5">
+                        <td colSpan={4} className="px-2 py-2.5">
                           <div className={`flex items-center gap-2 ${group.isPet ? 'text-amber-400' : 'text-gold'}`}>
                             <span className="font-body font-semibold text-sm uppercase tracking-wider">
                               {group.name}
@@ -564,10 +631,19 @@ export default function PriceLists() {
                             </span>
                           </div>
                         </td>
+                        <td className="px-3 py-2.5 text-center" onClick={e => e.stopPropagation()}>
+                          <Checkbox
+                            checked={groupNcAllOn}
+                            indeterminate={!groupNcAllOn && groupNcSomeOn}
+                            onChange={() => toggleNeedsCheckGroup(group.rows)}
+                          />
+                        </td>
+                        <td colSpan={TIERS.length + 1}></td>
                       </tr>
 
                       {group.rows.map((item, idx) => {
                         const isChecked = selected.has(item.sku_article)
+                        const isNeedsCheck = needsCheck.has(item.sku_article)
                         const globalNum = groupOffset + idx + 1
                         const desc = descriptions[item.sku_article]
 
@@ -600,6 +676,18 @@ export default function PriceLists() {
                             </td>
                             <td className="px-4 py-2.5 text-muted font-mono text-right whitespace-nowrap">
                               {formatWeight(item.package_size, item.package_unit)}
+                            </td>
+                            <td
+                              className="px-3 py-2.5 text-center"
+                              onClick={e => e.stopPropagation()}
+                              title={isNeedsCheck
+                                ? 'В клиентском прайсе попадёт «Уточнить наличие»'
+                                : 'В клиентском прайсе будет «В наличии»'}
+                            >
+                              <Checkbox
+                                checked={isNeedsCheck}
+                                onChange={() => toggleNeedsCheck(item.sku_article)}
+                              />
                             </td>
                             {TIERS.map((t, ti) => (
                               <td key={t.key} className={`px-4 py-2.5 font-mono text-right whitespace-nowrap ${ti === 0 ? 'text-gold font-medium' : 'text-gold/70'}`}>

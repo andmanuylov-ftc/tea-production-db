@@ -8,22 +8,28 @@ import {
   Wrench,
   FolderOpen,
   FileText,
-  BookText
+  BookText,
+  LogOut,
 } from 'lucide-react'
+import { useAuth } from '../contexts/AuthContext'
 
 const nav = [
-  { to: '/assortments',  label: 'Ассортименты', icon: Layers },
-  { to: '/dashboard',    label: 'Дашборд',      icon: LayoutDashboard },
-  { to: '/recipes',      label: 'Рецепты',       icon: FlaskConical },
-  { to: '/skus',         label: 'SKU',           icon: Package },
-  { to: '/materials',    label: 'Сырьё',         icon: Leaf },
-  { to: '/constructor',  label: 'Конструктор',   icon: Wrench },
-  { to: '/project',      label: 'Проект',        icon: FolderOpen },
-  { to: '/descriptions', label: 'Описания',      icon: BookText },
-  { to: '/pricelists',   label: 'Прайс лист',    icon: FileText },
+  { to: '/assortments',  label: 'Ассортименты', icon: Layers,          adminOnly: true },
+  { to: '/dashboard',    label: 'Дашборд',      icon: LayoutDashboard, adminOnly: true },
+  { to: '/recipes',      label: 'Рецепты',      icon: FlaskConical,    adminOnly: true },
+  { to: '/skus',         label: 'SKU',          icon: Package,         adminOnly: true },
+  { to: '/materials',    label: 'Сырьё',        icon: Leaf,            adminOnly: true },
+  { to: '/constructor',  label: 'Конструктор',  icon: Wrench,          adminOnly: true },
+  { to: '/project',      label: 'Проект',       icon: FolderOpen,      adminOnly: true },
+  { to: '/descriptions', label: 'Описания',     icon: BookText,        adminOnly: true },
+  { to: '/pricelists',   label: 'Прайс лист',   icon: FileText,        adminOnly: false },
 ]
 
 export default function Layout({ children }) {
+  const { profile, signOut } = useAuth()
+  const isAdmin = profile?.role === 'admin'
+  const items = nav.filter((i) => isAdmin || !i.adminOnly)
+
   return (
     <div className="flex h-screen overflow-hidden">
       <aside className="w-60 flex-shrink-0 bg-forest border-r border-forest-light/40 flex flex-col">
@@ -40,7 +46,7 @@ export default function Layout({ children }) {
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {nav.map(({ to, label, icon: Icon }) => (
+          {items.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}
@@ -58,8 +64,23 @@ export default function Layout({ children }) {
           ))}
         </nav>
 
-        <div className="px-6 py-4 border-t border-forest-light/40">
-          <div className="text-muted text-xs font-mono">v0.4.0</div>
+        <div className="px-3 py-4 border-t border-forest-light/40">
+          {profile && (
+            <div className="px-3 mb-3">
+              <div className="text-cream text-sm font-body truncate">{profile.full_name}</div>
+              <div className="text-muted text-xs">
+                {profile.role === 'admin' ? 'Администратор' : 'Менеджер'}
+              </div>
+            </div>
+          )}
+          <button
+            onClick={signOut}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-body text-muted hover:text-cream hover:bg-forest-light/50 transition-all"
+          >
+            <LogOut size={16} />
+            Выйти
+          </button>
+          <div className="text-muted text-xs font-mono mt-3 px-3">v0.5.0</div>
         </div>
       </aside>
 

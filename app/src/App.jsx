@@ -1,5 +1,8 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route } from 'react-router-dom'
 import Layout from './components/Layout'
+import ProtectedRoute from './components/ProtectedRoute'
+import RootRedirect from './components/RootRedirect'
+import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Recipes from './pages/Recipes'
 import SKUs from './pages/SKUs'
@@ -12,23 +15,36 @@ import Project from './pages/Project'
 import PriceLists from './pages/PriceLists'
 import Descriptions from './pages/Descriptions'
 
+const adminOnly = (el) => <ProtectedRoute adminOnly>{el}</ProtectedRoute>
+
 export default function App() {
   return (
-    <Layout>
-      <Routes>
-        <Route path="/" element={<Navigate to="/assortments" replace />} />
-        <Route path="/assortments" element={<Assortments />} />
-        <Route path="/assortments/:code" element={<AssortmentDetail />} />
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/recipes" element={<Recipes />} />
-        <Route path="/skus" element={<SKUs />} />
-        <Route path="/materials" element={<Materials />} />
-        <Route path="/materials/import" element={<MaterialsImport />} />
-        <Route path="/constructor" element={<Constructor />} />
-        <Route path="/project" element={<Project />} />
-        <Route path="/descriptions" element={<Descriptions />} />
-        <Route path="/pricelists" element={<PriceLists />} />
-      </Routes>
-    </Layout>
+    <Routes>
+      <Route path="/login" element={<Login />} />
+
+      <Route
+        path="/*"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Routes>
+                <Route path="/" element={<RootRedirect />} />
+                <Route path="/pricelists" element={<PriceLists />} />
+                <Route path="/assortments" element={adminOnly(<Assortments />)} />
+                <Route path="/assortments/:code" element={adminOnly(<AssortmentDetail />)} />
+                <Route path="/dashboard" element={adminOnly(<Dashboard />)} />
+                <Route path="/recipes" element={adminOnly(<Recipes />)} />
+                <Route path="/skus" element={adminOnly(<SKUs />)} />
+                <Route path="/materials" element={adminOnly(<Materials />)} />
+                <Route path="/materials/import" element={adminOnly(<MaterialsImport />)} />
+                <Route path="/constructor" element={adminOnly(<Constructor />)} />
+                <Route path="/project" element={adminOnly(<Project />)} />
+                <Route path="/descriptions" element={adminOnly(<Descriptions />)} />
+              </Routes>
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+    </Routes>
   )
 }

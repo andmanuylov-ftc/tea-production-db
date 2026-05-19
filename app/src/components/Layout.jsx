@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard,
@@ -10,9 +11,11 @@ import {
   FileText,
   BookText,
   Users,
+  KeyRound,
   LogOut,
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import ChangePasswordModal from './ChangePasswordModal'
 
 const nav = [
   { to: '/assortments',     label: 'Ассортименты', icon: Layers,          adminOnly: true },
@@ -31,6 +34,7 @@ export default function Layout({ children }) {
   const { profile, signOut } = useAuth()
   const isAdmin = profile?.role === 'admin'
   const items = nav.filter((i) => isAdmin || !i.adminOnly)
+  const [showChangePassword, setShowChangePassword] = useState(false)
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -76,19 +80,30 @@ export default function Layout({ children }) {
             </div>
           )}
           <button
+            onClick={() => setShowChangePassword(true)}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-body text-muted hover:text-cream hover:bg-forest-light/50 transition-all"
+          >
+            <KeyRound size={16} />
+            Сменить пароль
+          </button>
+          <button
             onClick={signOut}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-body text-muted hover:text-cream hover:bg-forest-light/50 transition-all"
           >
             <LogOut size={16} />
             Выйти
           </button>
-          <div className="text-muted text-xs font-mono mt-3 px-3">v0.6.0</div>
+          <div className="text-muted text-xs font-mono mt-3 px-3">v0.7.0</div>
         </div>
       </aside>
 
       <main className="flex-1 overflow-y-auto bg-forest-dark">
         {children}
       </main>
+
+      {showChangePassword && (
+        <ChangePasswordModal onClose={() => setShowChangePassword(false)} />
+      )}
     </div>
   )
 }

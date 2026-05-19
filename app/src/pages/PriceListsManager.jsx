@@ -53,10 +53,6 @@ function formatDateTime(iso) {
   })
 }
 
-function tierLabel(key) {
-  return TIERS.find(t => t.key === key)?.label ?? key
-}
-
 export default function PriceListsManager() {
   const { user } = useAuth()
 
@@ -68,11 +64,6 @@ export default function PriceListsManager() {
   const [categoryFilter, setCategoryFilter] = useState('')
   const [packageFilter, setPackageFilter] = useState('')
 
-  // Модалка скачивания
-  const [showModal, setShowModal] = useState(false)
-  const [selectedTier, setSelectedTier] = useState('opt')
-  const [clientName, setClientName] = useState('')
-  const [notes, setNotes] = useState('')
   const [exporting, setExporting] = useState(false)
 
   // История скачиваний
@@ -155,33 +146,21 @@ export default function PriceListsManager() {
     )
   }
 
-  function openModal() {
-    setSelectedTier('opt')
-    setClientName('')
-    setNotes('')
-    setShowModal(true)
-  }
-
-  function closeModal() {
-    if (exporting) return
-    setShowModal(false)
-  }
-
-  // Скачивание клиентского прайса
+  // Скачивание клиентского прайса — все 5 уровней, без модалки
   async function downloadXLSX() {
     if (!user) return
     setExporting(true)
     try {
-      // 1. Аудит-лог — пишем первым. INSERT с RLS проверит is_active_user().
+      // 1. Аудит-лог (tier = 'all', контрагент/примечание пустые)
       const skuCount = filteredRows.length
       const { error: auditError } = await supabase
         .from('pricelist_downloads')
         .insert({
           user_id: user.id,
-          tier: selectedTier,
-          client_name: clientName.trim() || null,
+          tier: 'all',
+          client_name: null,
           sku_count: skuCount,
-          notes: notes.trim() || null,
+          notes: null,
         })
       if (auditError) throw new Error(`Не удалось записать аудит-лог: ${auditError.message}`)
 
@@ -214,7 +193,7 @@ export default function PriceListsManager() {
         sheet.getCell(`F${row}`).value = 'гр'
         sheet.getCell(`G${row}`).value = 1
         sheet.getCell(`H${row}`).value = 1
-        // Вариант 2: пишем все 5 уровней (формулы шаблона ссылаются на I–M)
+        // Вариант 2: пишем все 5 уровней — формулы шаблона ссылаются на I–M
         TIERS.forEach((t, ti) => {
           sheet.getCell(`${PRICE_COLS[ti]}${row}`).value = sku[t.column] ?? 0
         })
@@ -227,10 +206,7 @@ export default function PriceListsManager() {
       })
       const url = URL.createObjectURL(blob)
       const today = new Date().toLocaleDateString('ru-RU').replace(/\./g, '-')
-      const tierName = tierLabel(selectedTier)
-      const client = clientName.trim()
-      const clientSuffix = client ? ` ${client}` : ''
-      const fileName = `Прайс ПЧК${clientSuffix} ${tierName} ${today}.xlsx`
+      const fileName = `Прайс ПЧК ${today}.xlsx`
 
       const a = document.createElement('a')
       a.href = url
@@ -241,9 +217,6 @@ export default function PriceListsManager() {
       setTimeout(() => URL.revokeObjectURL(url), 1000)
 
       await loadHistory()
-      setShowModal(false)
-      setClientName('')
-      setNotes('')
     } catch (err) {
       console.error('Ошибка выгрузки:', err)
       alert(`Не удалось сформировать прайс: ${err.message}`)
@@ -312,15 +285,15 @@ export default function PriceListsManager() {
         <div className="flex-1" />
 
         <button
-          onClick={openModal}
-          disabled={loading || filteredRows.length === 0}
+          onClick={downloadXLSX}
+          disabled={loading || exporting || filteredRows.length === 0}
           className="flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-500/40
                      bg-emerald-500/10 text-emerald-300 text-xs font-body font-medium
                      hover:bg-emerald-500/20 hover:border-emerald-500/60 transition-colors whitespace-nowrap
                      disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          <FileSpreadsheet size={14} />
-          Скачать клиентский прайс
+          {exporting ? <Download size={14} className="animate-pulse" /> : <FileSpreadsheet size={14} />}
+          {exporting ? 'Готовится…' : 'Скачать клиентский прайс-лист'}
         </button>
       </div>
 
@@ -414,106 +387,20 @@ export default function PriceListsManager() {
                 <thead>
                   <tr className="border-b border-forest-light/10 bg-forest-light/5">
                     <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-2">Дата</th>
-                    <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-2">Уровень</th>
-                    <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-2">Контрагент</th>
-                    <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-4 py-2">Кол-во</th>
-                    <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-2">Примечание</th>
+                    <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-4 py-2">Кол-во позиций</th>
                   </tr>
                 </thead>
                 <tbody>
                   {history.map(h => (
                     <tr key={h.id} className="border-t border-forest-light/10">
                       <td className="px-4 py-2 text-muted text-xs font-mono whitespace-nowrap">{formatDateTime(h.downloaded_at)}</td>
-                      <td className="px-4 py-2 text-gold text-xs whitespace-nowrap">{tierLabel(h.tier)}</td>
-                      <td className="px-4 py-2 text-cream text-xs">{h.client_name ?? '—'}</td>
                       <td className="px-4 py-2 text-muted text-xs text-right whitespace-nowrap">{h.sku_count ?? '—'}</td>
-                      <td className="px-4 py-2 text-muted text-xs italic">{h.notes ?? ''}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
-        </div>
-      )}
-
-      {/* Модалка скачивания */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4" onClick={closeModal}>
-          <div
-            className="bg-forest border border-forest-light/40 rounded-xl p-6 w-full max-w-md"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="font-display text-cream text-lg">Скачать клиентский прайс</h2>
-              <button onClick={closeModal} disabled={exporting} className="text-muted hover:text-cream disabled:opacity-40">
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-muted text-xs mb-2">Уровень цен</label>
-                <div className="space-y-1.5">
-                  {TIERS.map(t => (
-                    <label key={t.key} className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="tier"
-                        value={t.key}
-                        checked={selectedTier === t.key}
-                        onChange={e => setSelectedTier(e.target.value)}
-                        className="accent-gold"
-                      />
-                      <span className="text-cream text-sm font-body">{t.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-muted text-xs mb-1.5">
-                  Контрагент <span className="text-muted/60">(необязательно)</span>
-                </label>
-                <input
-                  type="text"
-                  value={clientName}
-                  onChange={e => setClientName(e.target.value)}
-                  placeholder="ООО «Ромашка»"
-                  className="w-full px-3 py-2 rounded-lg bg-forest-dark border border-forest-light/40 text-cream text-sm focus:outline-none focus:border-gold/60 placeholder:text-muted"
-                />
-              </div>
-
-              <div>
-                <label className="block text-muted text-xs mb-1.5">
-                  Примечание <span className="text-muted/60">(необязательно)</span>
-                </label>
-                <textarea
-                  value={notes}
-                  onChange={e => setNotes(e.target.value)}
-                  rows={2}
-                  placeholder="Для аудит-лога"
-                  className="w-full px-3 py-2 rounded-lg bg-forest-dark border border-forest-light/40 text-cream text-sm focus:outline-none focus:border-gold/60 resize-none placeholder:text-muted"
-                />
-              </div>
-
-              <div className="text-muted text-xs">
-                В файл попадёт <span className="text-cream font-mono">{filteredRows.length}</span> позиций (с учётом фильтров)
-              </div>
-
-              <button
-                onClick={downloadXLSX}
-                disabled={exporting}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg
-                           border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 text-sm font-body
-                           hover:bg-emerald-500/20 hover:border-emerald-500/60 transition-colors
-                           disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <Download size={16} />
-                {exporting ? 'Готовится…' : 'Сформировать XLSX'}
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </div>

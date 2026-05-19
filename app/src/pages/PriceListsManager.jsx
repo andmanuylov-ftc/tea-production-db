@@ -33,16 +33,24 @@ function normalizeGrams(size, unit) {
   return Math.round(n)
 }
 
+// Расшифровка артикулов:
+//   П = пакет, Р = ручная фасовка, А = автоматическая, число = граммы
+//   суффиксы -10 / -10Б — ПЭТ-банки
+//   без суффикса (7049И, 7068-СМ-500, 7221, 7236) — прессованный чай (блины/туоча/в камнях)
 function getPackageFormat(article) {
-  if (!article) return 'другое'
+  if (!article) return 'Прессованный'
+  if (article.includes('-ПР100'))  return 'ПР100'
+  if (article.includes('-ПА500'))  return 'ПА500'
+  if (article.includes('-ПР250'))  return 'ПР250'
+  if (article.includes('-ПР500'))  return 'ПР500'
+  if (article.includes('-ПА250'))  return 'ПА250'
   if (article.includes('-ЗИП100')) return 'ЗИП100'
-  if (article.includes('-ПА500')) return 'ПА500'
-  if (article.includes('-ПР')) return 'Прессованный'
-  if (/-10[А-Я]?$/.test(article)) return 'ПЭТ-банка'
-  return 'другое'
+  if (/-10[А-Я]?$/.test(article))  return 'ПЭТ'
+  // Прессованный чай: артикулы без стандартного суффикса (7049И, 7068-СМ-500, 7221, 7236)
+  return 'Прессованный'
 }
 
-const PACKAGE_OPTIONS = ['ЗИП100', 'ПА500', 'ПЭТ-банка', 'Прессованный', 'другое']
+const PACKAGE_OPTIONS = ['ПР100', 'ПА500', 'ПЭТ', 'ПР250', 'ЗИП100', 'ПР500', 'Прессованный', 'ПА250']
 
 function formatDateTime(iso) {
   if (!iso) return '—'

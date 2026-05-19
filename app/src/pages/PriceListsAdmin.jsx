@@ -409,7 +409,7 @@ export default function PriceListsAdmin() {
       }
 
       const START_ROW = 11
-      const END_ROW = 310
+      const END_ROW = 810
       const MAX_ROWS = END_ROW - START_ROW + 1
 
       if (flatSkus.length > MAX_ROWS) {

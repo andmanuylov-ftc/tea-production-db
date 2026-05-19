@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
+import * as XLSX from 'xlsx'
 import ExcelJS from 'exceljs'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
@@ -8,7 +9,7 @@ import {
   ChevronDown, ChevronUp, Image as ImageIcon,
 } from 'lucide-react'
 
-// 5 уровней цен — соответствуют колонкам manager_pricelist_v1
+// 5 уровней цен — соответствуют колонкам manager_pricelist_v1 (цены без НДС)
 const TIERS = [
   { key: 'base',        label: 'Базовый',          column: 'price_base' },
   { key: 'opt',         label: 'Опт',              column: 'price_opt' },
@@ -36,7 +37,7 @@ function normalizeGrams(size, unit) {
 // Расшифровка артикулов:
 //   П = пакет, Р = ручная фасовка, А = автоматическая, число = граммы
 //   суффиксы -10 / -10Б — ПЭТ-банки
-//   без суффикса (7049И, 7068-СМ-500, 7221, 7236) — прессованный чай (блины/туоча/в камнях)
+//   без суффикса (7049И, 7068-СМ-500, 7221, 7236) — прессованный чай
 function getPackageFormat(article) {
   if (!article) return 'Прессованный'
   if (article.includes('-ПР100'))  return 'ПР100'
@@ -46,7 +47,6 @@ function getPackageFormat(article) {
   if (article.includes('-ПА250'))  return 'ПА250'
   if (article.includes('-ЗИП100')) return 'ЗИП100'
   if (/-10[А-Я]?$/.test(article))  return 'ПЭТ'
-  // Прессованный чай: артикулы без стандартного суффикса (7049И, 7068-СМ-500, 7221, 7236)
   return 'Прессованный'
 }
 
@@ -61,6 +61,23 @@ function formatDateTime(iso) {
   })
 }
 
+// Компонент чекбокса с поддержкой indeterminate (как у админа)
+function Checkbox({ checked, indeterminate, onChange, className = '' }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = indeterminate ?? false
+  }, [indeterminate])
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      checked={checked}
+      onChange={onChange}
+      className={`w-4 h-4 rounded border border-forest-light/50 bg-forest-dark accent-gold cursor-pointer ${className}`}
+    />
+  )
+}
+
 export default function PriceListsManager() {
   const { user } = useAuth()
 
@@ -72,9 +89,10 @@ export default function PriceListsManager() {
   const [categoryFilter, setCategoryFilter] = useState('')
   const [packageFilter, setPackageFilter] = useState('')
 
+  const [selected, setSelected] = useState(new Set())
   const [exporting, setExporting] = useState(false)
+  const [exportingFlat, setExportingFlat] = useState(false)
 
-  // История скачиваний
   const [history, setHistory] = useState([])
   const [historyExpanded, setHistoryExpanded] = useState(false)
 
@@ -140,6 +158,56 @@ export default function PriceListsManager() {
     })
   }, [rows, search, categoryFilter, packageFilter])
 
+  // Группировка по категории — для экрана и выгрузок
+  function groupByCategory(rs) {
+    const map = new Map()
+    for (const r of rs) {
+      const key = r.category_name ?? 'Без категории'
+      if (!map.has(key)) map.set(key, [])
+      map.get(key).push(r)
+    }
+    return Array.from(map.entries())
+      .map(([name, items]) => ({ name, rows: items }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
+  }
+
+  const groups = useMemo(() => groupByCategory(filteredRows), [filteredRows])
+
+  // Сводные флаги выделения
+  const allVisible = filteredRows.length > 0 && filteredRows.every(r => selected.has(r.sku_article))
+  const someVisible = filteredRows.some(r => selected.has(r.sku_article))
+  const selCount = selected.size
+
+  function toggleRow(key) {
+    setSelected(prev => {
+      const s = new Set(prev)
+      s.has(key) ? s.delete(key) : s.add(key)
+      return s
+    })
+  }
+
+  function toggleGroup(groupRows) {
+    setSelected(prev => {
+      const s = new Set(prev)
+      const keys = groupRows.map(r => r.sku_article)
+      const allOn = keys.every(k => s.has(k))
+      if (allOn) keys.forEach(k => s.delete(k))
+      else       keys.forEach(k => s.add(k))
+      return s
+    })
+  }
+
+  function toggleAll() {
+    setSelected(prev => {
+      const s = new Set(prev)
+      const keys = filteredRows.map(r => r.sku_article)
+      const allOn = keys.every(k => s.has(k))
+      if (allOn) keys.forEach(k => s.delete(k))
+      else       keys.forEach(k => s.add(k))
+      return s
+    })
+  }
+
   function highlight(text) {
     if (!search.trim() || !text) return text
     const q = search.trim()
@@ -154,13 +222,85 @@ export default function PriceListsManager() {
     )
   }
 
-  // Скачивание клиентского прайса — все 5 уровней, без модалки
-  async function downloadXLSX() {
+  // Общая выборка для выгрузок: выбранные (если есть) или все отфильтрованные
+  function getExportRows() {
+    if (selCount > 0) return filteredRows.filter(r => selected.has(r.sku_article))
+    return filteredRows
+  }
+
+  // ---- Плоский внутренний прайс (без НДС, группировка по категориям) ----
+  async function exportFlatPriceList() {
+    if (!user) return
+    setExportingFlat(true)
+    try {
+      const exportRows = getExportRows()
+      const exportGroups = groupByCategory(exportRows)
+      const today = new Date().toLocaleDateString('ru-RU')
+
+      const sheetData = [
+        ['Прайс-лист ПЧК/ADDIS'],
+        [`Дата выгрузки: ${today}`],
+        ['Цены без НДС, по уровням клиентов'],
+        [],
+      ]
+
+      let globalIdx = 1
+      exportGroups.forEach((group, gi) => {
+        sheetData.push([group.name])
+        sheetData.push([
+          '№', 'Артикул', 'Наименование', 'Вес, гр.',
+          ...TIERS.map(t => t.label),
+          'Описание',
+        ])
+        group.rows.forEach(item => {
+          sheetData.push([
+            globalIdx++,
+            item.sku_article ?? '—',
+            item.sku_name ?? '—',
+            formatWeight(item.package_size, item.package_unit),
+            ...TIERS.map(t => item[t.column] ?? 0),
+            descriptions[item.product_id] ?? '',
+          ])
+        })
+        if (gi < exportGroups.length - 1) sheetData.push([])
+      })
+
+      const ws = XLSX.utils.aoa_to_sheet(sheetData)
+      ws['!cols'] = [
+        { wch: 4 }, { wch: 14 }, { wch: 32 }, { wch: 8 },
+        { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 18 },
+        { wch: 28 },
+      ]
+      ws['!pageSetup'] = {
+        paperSize: 9, orientation: 'landscape',
+        fitToPage: true, fitToWidth: 1, fitToHeight: 0,
+      }
+      ws['!margins'] = {
+        left: 0.4, right: 0.4, top: 0.6, bottom: 0.6, header: 0.2, footer: 0.2,
+      }
+
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, 'Прайс-лист')
+      const suffix = selCount > 0 ? ` (${exportRows.length} поз)` : ''
+      const fileName = `Прайс-лист ПЧК${suffix} ${today.replace(/\./g, '-')}.xlsx`
+      XLSX.writeFile(wb, fileName)
+    } catch (err) {
+      console.error('Ошибка выгрузки:', err)
+      alert(`Не удалось сформировать прайс: ${err.message}`)
+    } finally {
+      setExportingFlat(false)
+    }
+  }
+
+  // ---- Клиентский прайс (через template_price.xlsx) ----
+  async function exportClientPriceList() {
     if (!user) return
     setExporting(true)
     try {
-      // 1. Аудит-лог (tier = 'all', контрагент/примечание пустые)
-      const skuCount = filteredRows.length
+      const exportRows = getExportRows()
+      const skuCount = exportRows.length
+
+      // 1. Аудит-лог
       const { error: auditError } = await supabase
         .from('pricelist_downloads')
         .insert({
@@ -187,13 +327,20 @@ export default function PriceListsManager() {
       const MAX_ROWS = END_ROW - START_ROW + 1
       const PRICE_COLS = ['I', 'J', 'K', 'L', 'M']
 
-      const fillCount = Math.min(filteredRows.length, MAX_ROWS)
+      // Собираем плоский список в порядке категорий (категория попадёт в столбец A)
+      const exportGroups = groupByCategory(exportRows)
+      const flatSkus = []
+      for (const g of exportGroups) {
+        for (const s of g.rows) flatSkus.push({ ...s, categoryName: g.name })
+      }
+
+      const fillCount = Math.min(flatSkus.length, MAX_ROWS)
       for (let i = 0; i < fillCount; i++) {
-        const sku = filteredRows[i]
+        const sku = flatSkus[i]
         const row = START_ROW + i
         const grams = normalizeGrams(sku.package_size, sku.package_unit)
 
-        sheet.getCell(`A${row}`).value = sku.category_name ?? ''
+        sheet.getCell(`A${row}`).value = sku.categoryName
         sheet.getCell(`B${row}`).value = sku.sku_article ?? ''
         sheet.getCell(`C${row}`).value = sku.sku_name ?? ''
         sheet.getCell(`D${row}`).value = descriptions[sku.product_id] ?? ''
@@ -201,11 +348,16 @@ export default function PriceListsManager() {
         sheet.getCell(`F${row}`).value = 'гр'
         sheet.getCell(`G${row}`).value = 1
         sheet.getCell(`H${row}`).value = 1
-        // Вариант 2: пишем все 5 уровней — формулы шаблона ссылаются на I–M
         TIERS.forEach((t, ti) => {
           sheet.getCell(`${PRICE_COLS[ti]}${row}`).value = sku[t.column] ?? 0
         })
-        sheet.getCell(`N${row}`).value = 'В наличии'
+        // Колонка статуса (N) — всегда пустая
+        sheet.getCell(`N${row}`).value = null
+      }
+
+      // Очищаем колонку N во всех строках диапазона (если в шаблоне был текст по умолчанию)
+      for (let r = START_ROW; r <= END_ROW; r++) {
+        sheet.getCell(`N${r}`).value = null
       }
 
       const outBuffer = await wb.xlsx.writeBuffer()
@@ -214,7 +366,8 @@ export default function PriceListsManager() {
       })
       const url = URL.createObjectURL(blob)
       const today = new Date().toLocaleDateString('ru-RU').replace(/\./g, '-')
-      const fileName = `Прайс ПЧК ${today}.xlsx`
+      const suffix = selCount > 0 ? ` (${skuCount} поз)` : ''
+      const fileName = `Клиентский прайс ПЧК${suffix} ${today}.xlsx`
 
       const a = document.createElement('a')
       a.href = url
@@ -250,7 +403,6 @@ export default function PriceListsManager() {
         }
       />
 
-      {/* Фильтры */}
       <div className="flex items-center gap-3 mb-6 flex-wrap">
         <div className="relative flex-1 min-w-[16rem] max-w-sm">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
@@ -290,22 +442,53 @@ export default function PriceListsManager() {
           {PACKAGE_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
         </select>
 
+        {selCount > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-gold text-xs font-mono">{selCount} выбрано</span>
+            <button onClick={() => setSelected(new Set())}
+              className="text-muted hover:text-cream transition-colors" title="Снять выделение">
+              <X size={13} />
+            </button>
+          </div>
+        )}
+
         <div className="flex-1" />
 
         <button
-          onClick={downloadXLSX}
+          onClick={exportFlatPriceList}
+          disabled={loading || exportingFlat || filteredRows.length === 0}
+          className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gold/30
+                     bg-gold/10 text-gold text-xs font-body font-medium
+                     hover:bg-gold/20 hover:border-gold/50 transition-colors whitespace-nowrap
+                     disabled:opacity-40 disabled:cursor-not-allowed"
+          title="Плоский прайс с 5 уровнями цен, без НДС, с группировкой по категориям"
+        >
+          {exportingFlat ? <Download size={14} className="animate-pulse" /> : <Download size={14} />}
+          {exportingFlat
+            ? 'Готовится…'
+            : selCount > 0
+              ? `Прайс-лист (${selCount})`
+              : 'Скачать прайс-лист'}
+        </button>
+
+        <button
+          onClick={exportClientPriceList}
           disabled={loading || exporting || filteredRows.length === 0}
           className="flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-500/40
                      bg-emerald-500/10 text-emerald-300 text-xs font-body font-medium
                      hover:bg-emerald-500/20 hover:border-emerald-500/60 transition-colors whitespace-nowrap
                      disabled:opacity-40 disabled:cursor-not-allowed"
+          title="B2B клиентский прайс с бланком заказа (через шаблон)"
         >
           {exporting ? <Download size={14} className="animate-pulse" /> : <FileSpreadsheet size={14} />}
-          {exporting ? 'Готовится…' : 'Скачать клиентский прайс-лист'}
+          {exporting
+            ? 'Готовится…'
+            : selCount > 0
+              ? `Клиентский (${selCount})`
+              : 'Клиентский прайс-лист'}
         </button>
       </div>
 
-      {/* Таблица */}
       {loading ? (
         <div className="text-muted text-sm font-mono animate-pulse">Загрузка...</div>
       ) : filteredRows.length === 0 ? (
@@ -318,11 +501,18 @@ export default function PriceListsManager() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-forest-light/20 bg-forest-light/5">
+                  <th className="px-4 py-3 w-10">
+                    <Checkbox
+                      checked={allVisible}
+                      indeterminate={!allVisible && someVisible}
+                      onChange={toggleAll}
+                    />
+                  </th>
+                  <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-2 py-3 w-8">#</th>
                   <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-3">Артикул</th>
                   <th className="text-muted text-xs uppercase tracking-widest font-body text-center px-2 py-3 w-12">Фото</th>
                   <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-3">Наименование</th>
                   <th className="text-muted text-xs uppercase tracking-widest font-body text-right px-4 py-3">Вес, гр.</th>
-                  <th className="text-muted text-xs uppercase tracking-widest font-body text-left px-4 py-3">Категория</th>
                   {TIERS.map(t => (
                     <th key={t.key} className="text-gold text-xs uppercase tracking-widest font-body text-right px-4 py-3 whitespace-nowrap">
                       {t.label}
@@ -331,54 +521,101 @@ export default function PriceListsManager() {
                 </tr>
               </thead>
               <tbody>
-                {filteredRows.map((item, idx) => (
-                  <tr
-                    key={item.product_id}
-                    className={`border-t border-forest-light/10 ${idx % 2 !== 0 ? 'bg-forest-light/5' : ''} hover:bg-forest-light/10 transition-colors`}
-                  >
-                    <td className="px-4 py-2.5">
-                      <span className="bg-gold/10 text-gold border border-gold/20 font-mono text-xs px-2 py-0.5 rounded whitespace-nowrap">
-                        {highlight(item.sku_article ?? '—')}
-                      </span>
-                    </td>
-                    <td className="px-2 py-2.5">
-                      {item.photo_url ? (
-                        <img
-                          src={item.photo_url}
-                          alt=""
-                          className="w-8 h-8 rounded object-cover bg-forest-light/20"
-                          onError={e => { e.currentTarget.style.display = 'none' }}
-                        />
-                      ) : (
-                        <div className="w-8 h-8 rounded bg-forest-light/20 flex items-center justify-center mx-auto">
-                          <ImageIcon size={12} className="text-muted/50" />
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-2.5 text-cream font-body">
-                      {highlight(item.sku_name ?? '—')}
-                    </td>
-                    <td className="px-4 py-2.5 text-muted font-mono text-right whitespace-nowrap">
-                      {formatWeight(item.package_size, item.package_unit)}
-                    </td>
-                    <td className="px-4 py-2.5 text-muted text-xs">{item.category_name ?? '—'}</td>
-                    {TIERS.map((t, ti) => (
-                      <td
-                        key={t.key}
-                        className={`px-4 py-2.5 font-mono text-right whitespace-nowrap ${ti === 0 ? 'text-gold font-medium' : 'text-gold/70'}`}
-                      >
-                        {item[t.column]?.toLocaleString('ru-RU') ?? '—'}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
+                {groups.map((group, gi) => {
+                  const groupAllOn  = group.rows.every(r => selected.has(r.sku_article))
+                  const groupSomeOn = group.rows.some(r => selected.has(r.sku_article))
+                  const groupOffset = groups.slice(0, gi).reduce((acc, g) => acc + g.rows.length, 0)
+
+                  return (
+                    <>
+                      <tr key={`group-${group.name}`} className="border-t-2 border-forest-light/30 bg-forest-light/5">
+                        <td className="px-4 py-2.5">
+                          <Checkbox
+                            checked={groupAllOn}
+                            indeterminate={!groupAllOn && groupSomeOn}
+                            onChange={() => toggleGroup(group.rows)}
+                          />
+                        </td>
+                        <td colSpan={5 + TIERS.length} className="px-2 py-2.5">
+                          <div className="flex items-center gap-2 text-gold">
+                            <span className="font-body font-semibold text-sm uppercase tracking-wider">
+                              {group.name}
+                            </span>
+                            <span className="text-muted font-mono text-xs">
+                              — {group.rows.length} поз.
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+
+                      {group.rows.map((item, idx) => {
+                        const isChecked = selected.has(item.sku_article)
+                        const globalNum = groupOffset + idx + 1
+
+                        return (
+                          <tr
+                            key={item.product_id}
+                            onClick={() => toggleRow(item.sku_article)}
+                            className={`border-t border-forest-light/10 cursor-pointer transition-colors
+                              ${isChecked
+                                ? 'bg-gold/10 hover:bg-gold/15'
+                                : idx % 2 !== 0
+                                  ? 'bg-forest-light/5 hover:bg-forest-light/10'
+                                  : 'hover:bg-forest-light/5'
+                              }`}
+                          >
+                            <td className="px-4 py-2.5" onClick={e => e.stopPropagation()}>
+                              <Checkbox
+                                checked={isChecked}
+                                onChange={() => toggleRow(item.sku_article)}
+                              />
+                            </td>
+                            <td className="px-2 py-2.5 text-muted font-mono text-xs text-right">{globalNum}</td>
+                            <td className="px-4 py-2.5">
+                              <span className="bg-gold/10 text-gold border border-gold/20 font-mono text-xs px-2 py-0.5 rounded whitespace-nowrap">
+                                {highlight(item.sku_article ?? '—')}
+                              </span>
+                            </td>
+                            <td className="px-2 py-2.5">
+                              {item.photo_url ? (
+                                <img
+                                  src={item.photo_url}
+                                  alt=""
+                                  className="w-8 h-8 rounded object-cover bg-forest-light/20"
+                                  onError={e => { e.currentTarget.style.display = 'none' }}
+                                />
+                              ) : (
+                                <div className="w-8 h-8 rounded bg-forest-light/20 flex items-center justify-center mx-auto">
+                                  <ImageIcon size={12} className="text-muted/50" />
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-4 py-2.5 text-cream font-body">
+                              {highlight(item.sku_name ?? '—')}
+                            </td>
+                            <td className="px-4 py-2.5 text-muted font-mono text-right whitespace-nowrap">
+                              {formatWeight(item.package_size, item.package_unit)}
+                            </td>
+                            {TIERS.map((t, ti) => (
+                              <td
+                                key={t.key}
+                                className={`px-4 py-2.5 font-mono text-right whitespace-nowrap ${ti === 0 ? 'text-gold font-medium' : 'text-gold/70'}`}
+                              >
+                                {item[t.column]?.toLocaleString('ru-RU') ?? '—'}
+                              </td>
+                            ))}
+                          </tr>
+                        )
+                      })}
+                    </>
+                  )
+                })}
               </tbody>
             </table>
           </div>
         </div>
       )}
 
-      {/* История скачиваний */}
       {history.length > 0 && (
         <div className="mt-6 card p-0 overflow-hidden">
           <button

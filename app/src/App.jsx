@@ -14,6 +14,7 @@ import Constructor from './pages/Constructor'
 import Project from './pages/Project'
 import PriceLists from './pages/PriceLists'
 import Descriptions from './pages/Descriptions'
+import AdminManagers from './pages/AdminManagers'
 
 const adminOnly = (el) => <ProtectedRoute adminOnly>{el}</ProtectedRoute>
 
@@ -40,6 +41,7 @@ export default function App() {
                 <Route path="/constructor" element={adminOnly(<Constructor />)} />
                 <Route path="/project" element={adminOnly(<Project />)} />
                 <Route path="/descriptions" element={adminOnly(<Descriptions />)} />
+                <Route path="/admin/managers" element={adminOnly(<AdminManagers />)} />
               </Routes>
             </Layout>
           </ProtectedRoute>

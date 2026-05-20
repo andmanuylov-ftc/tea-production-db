@@ -5,6 +5,7 @@ import PageHeader from '../components/PageHeader'
 import {
   Search, Pencil, Trash2, X, Check, Clock, MoreHorizontal, Upload,
   Eye, FlaskConical, Package, ExternalLink, TrendingUp, TrendingDown, Minus,
+  Plus,
 } from 'lucide-react'
 
 // нормализация в кг (для расчёта долей в рецептах, где output_unit обычно 'кг')
@@ -38,11 +39,15 @@ function priceChangePct(curr, prev) {
   return ((c - p) / p) * 100
 }
 
+// Допустимые единицы (по правилам CONTEXT.md)
+const UNIT_OPTIONS = ['кг', 'шт', 'погм', 'рул']
+
 export default function Materials() {
   const navigate = useNavigate()
   const [rows, setRows]               = useState([])
   const [loading, setLoading]         = useState(true)
   const [search, setSearch]           = useState('')
+  const [categories, setCategories]   = useState([])
 
   // edit panel
   const [editRow, setEditRow]         = useState(null)
@@ -59,6 +64,18 @@ export default function Materials() {
   const [usageHistory, setUsageHistory]       = useState([])
   const [usageHistLoading, setUsageHistLoading] = useState(false)
 
+  // add panel — новое сырьё/материал
+  const [showAddPanel, setShowAddPanel] = useState(false)
+  const [addArticle, setAddArticle]     = useState('')
+  const [addName, setAddName]           = useState('')
+  const [addCategoryId, setAddCategoryId] = useState('')
+  const [addUnit, setAddUnit]           = useState('кг')
+  const [addPrice, setAddPrice]         = useState('')
+  const [addDate, setAddDate]           = useState(new Date().toISOString().slice(0, 10))
+  const [addSupplier, setAddSupplier]   = useState('')
+  const [addError, setAddError]         = useState('')
+  const [addSaving, setAddSaving]       = useState(false)
+
   // row menu
   const [confirmId, setConfirmId]     = useState(null)
   const [openMenuId, setOpenMenuId]   = useState(null)
@@ -68,6 +85,7 @@ export default function Materials() {
   useEffect(() => {
     mounted.current = true
     loadRows()
+    loadCategories()
     return () => { mounted.current = false }
   }, [])
 
@@ -89,6 +107,14 @@ export default function Materials() {
     if (mounted.current) { setRows(data ?? []); setLoading(false) }
   }
 
+  async function loadCategories() {
+    const { data } = await supabase
+      .from('material_categories')
+      .select('id, name')
+      .order('name')
+    if (mounted.current) setCategories(data ?? [])
+  }
+
   async function loadPriceHistory(materialId) {
     const { data } = await supabase
       .from('material_prices')
@@ -103,6 +129,7 @@ export default function Materials() {
 
   async function openEdit(row) {
     setOpenMenuId(null)
+    setShowAddPanel(false) // закрываем add если было
     setUsageRow(null); setUsage(null); setUsageHistory([]) // закрываем usage если было
     setEditRow(row)
     setEditName(row.name)
@@ -142,11 +169,112 @@ export default function Materials() {
     if (editRow?.id === id) setEditRow(null)
   }
 
+  // ───── Add panel ─────
+
+  function openAddPanel() {
+    // Закрываем все остальные панели
+    setEditRow(null)
+    setUsageRow(null); setUsage(null); setUsageHistory([])
+    setOpenMenuId(null)
+    // Сбрасываем форму
+    setAddArticle('')
+    setAddName('')
+    setAddCategoryId('')
+    setAddUnit('кг')
+    setAddPrice('')
+    setAddDate(new Date().toISOString().slice(0, 10))
+    setAddSupplier('')
+    setAddError('')
+    setShowAddPanel(true)
+  }
+
+  function closeAddPanel() {
+    setShowAddPanel(false)
+    setAddError('')
+  }
+
+  async function createMaterial() {
+    setAddError('')
+
+    // Валидация
+    const article = addArticle.trim()
+    const name    = addName.trim()
+    const supplier = addSupplier.trim()
+    const priceVal = parseFloat(addPrice.replace(',', '.'))
+
+    if (!article)            { setAddError('Укажите артикул'); return }
+    if (!name)               { setAddError('Укажите название'); return }
+    if (!addCategoryId)      { setAddError('Выберите категорию'); return }
+    if (!UNIT_OPTIONS.includes(addUnit)) { setAddError('Выберите единицу измерения'); return }
+    if (isNaN(priceVal) || priceVal <= 0) { setAddError('Цена должна быть больше 0'); return }
+    if (!addDate)            { setAddError('Укажите дату цены'); return }
+
+    setAddSaving(true)
+
+    try {
+      // Проверка дубликата артикула
+      const { data: dup, error: dupErr } = await supabase
+        .from('raw_materials')
+        .select('id, name')
+        .eq('article', article)
+        .maybeSingle()
+      if (dupErr) throw new Error(dupErr.message)
+      if (dup) {
+        setAddError(`Артикул «${article}» уже занят: «${dup.name}»`)
+        setAddSaving(false)
+        return
+      }
+
+      // 1. Создаём материал
+      const { data: matIns, error: matErr } = await supabase
+        .from('raw_materials')
+        .insert({
+          article,
+          name,
+          category_id: addCategoryId,
+          unit: addUnit,
+          supplier: supplier || null,
+          is_active: true,
+        })
+        .select('id')
+        .single()
+      if (matErr) throw new Error(matErr.message)
+
+      // 2. Создаём цену (обязательно по правилу — без цены позиция не имеет смысла)
+      const { error: priceErr } = await supabase
+        .from('material_prices')
+        .insert({
+          material_id:    matIns.id,
+          price_per_unit: priceVal,
+          valid_from:     addDate,
+          supplier:       supplier || null,
+        })
+      if (priceErr) {
+        // Откат: материал создан, цена нет — удаляем материал, чтобы не остался без цены
+        await supabase.from('raw_materials').delete().eq('id', matIns.id)
+        throw new Error(`Цена: ${priceErr.message}`)
+      }
+
+      // Обновляем список и закрываем форму
+      await loadRows()
+      if (mounted.current) {
+        setAddSaving(false)
+        setShowAddPanel(false)
+        // Подсветить новую строку через поиск
+        setSearch(article)
+      }
+    } catch (e) {
+      setAddError(e.message || 'Ошибка сохранения')
+      setAddSaving(false)
+    }
+  }
+
   // ───── Usage panel ─────
 
   async function openUsage(row) {
     setOpenMenuId(null)
     setEditRow(null) // закрываем edit
+    setShowAddPanel(false) // закрываем add
     setUsageRow(row)
     setUsage(null)
     setUsageHistory([])
@@ -345,14 +473,24 @@ export default function Materials() {
         title="Сырьё и материалы"
         subtitle={`${rows.length} позиций в базе`}
         action={
-          <button
-            onClick={() => navigate('/materials/import')}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gold/15 text-gold
-                       border border-gold/20 text-sm font-body hover:bg-gold/25 transition-all"
-          >
-            <Upload size={14} />
-            Импорт из Excel
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={openAddPanel}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500/15 text-emerald-300
+                         border border-emerald-500/30 text-sm font-body hover:bg-emerald-500/25 transition-all"
+            >
+              <Plus size={14} />
+              Новая позиция
+            </button>
+            <button
+              onClick={() => navigate('/materials/import')}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gold/15 text-gold
+                         border border-gold/20 text-sm font-body hover:bg-gold/25 transition-all"
+            >
+              <Upload size={14} />
+              Импорт из Excel
+            </button>
+          </div>
         }
       />
 
@@ -467,6 +605,123 @@ export default function Materials() {
             </tbody>
           </table>
         </div>
+
+        {/* Панель добавления новой позиции */}
+        {showAddPanel && (
+          <div className="w-80 flex-shrink-0 card">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-display text-sm font-semibold text-cream">Новая позиция</h3>
+              <button onClick={closeAddPanel} className="text-muted hover:text-cream transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="mb-3">
+              <label className="text-muted text-xs font-body block mb-1">Артикул <span className="text-red-400">*</span></label>
+              <input
+                value={addArticle}
+                onChange={e => setAddArticle(e.target.value)}
+                placeholder="например, 2317"
+                className="w-full bg-forest border border-forest-light/40 rounded-lg px-3 py-2
+                           text-cream text-sm font-mono focus:outline-none focus:border-gold/50"
+              />
+            </div>
+
+            <div className="mb-3">
+              <label className="text-muted text-xs font-body block mb-1">Название <span className="text-red-400">*</span></label>
+              <input
+                value={addName}
+                onChange={e => setAddName(e.target.value)}
+                placeholder="например, Яблоко 7-9мм"
+                className="w-full bg-forest border border-forest-light/40 rounded-lg px-3 py-2
+                           text-cream text-sm font-body focus:outline-none focus:border-gold/50"
+              />
+            </div>
+
+            <div className="mb-3">
+              <label className="text-muted text-xs font-body block mb-1">Категория <span className="text-red-400">*</span></label>
+              <select
+                value={addCategoryId}
+                onChange={e => setAddCategoryId(e.target.value)}
+                className="w-full bg-forest border border-forest-light/40 rounded-lg px-3 py-2
+                           text-cream text-sm font-body focus:outline-none focus:border-gold/50"
+              >
+                <option value="">— выберите категорию —</option>
+                {categories.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="mb-3 grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-muted text-xs font-body block mb-1">Ед. <span className="text-red-400">*</span></label>
+                <select
+                  value={addUnit}
+                  onChange={e => setAddUnit(e.target.value)}
+                  className="w-full bg-forest border border-forest-light/40 rounded-lg px-3 py-2
+                             text-cream text-sm font-body focus:outline-none focus:border-gold/50"
+                >
+                  {UNIT_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-muted text-xs font-body block mb-1">Цена ₽ <span className="text-red-400">*</span></label>
+                <input
+                  value={addPrice}
+                  onChange={e => setAddPrice(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full bg-forest border border-forest-light/40 rounded-lg px-3 py-2
+                             text-cream text-sm font-mono focus:outline-none focus:border-gold/50"
+                />
+              </div>
+            </div>
+
+            <div className="mb-3">
+              <label className="text-muted text-xs font-body block mb-1">Дата цены <span className="text-red-400">*</span></label>
+              <input
+                type="date"
+                value={addDate}
+                onChange={e => setAddDate(e.target.value)}
+                className="w-full bg-forest border border-forest-light/40 rounded-lg px-3 py-2
+                           text-cream text-sm font-mono focus:outline-none focus:border-gold/50"
+              />
+            </div>
+
+            <div className="mb-4">
+              <label className="text-muted text-xs font-body block mb-1">
+                Поставщик <span className="text-muted/50">(необязательно)</span>
+              </label>
+              <input
+                value={addSupplier}
+                onChange={e => setAddSupplier(e.target.value)}
+                placeholder="например, СимТех"
+                className="w-full bg-forest border border-forest-light/40 rounded-lg px-3 py-2
+                           text-cream text-sm font-body focus:outline-none focus:border-gold/50"
+              />
+            </div>
+
+            {addError && (
+              <div className="mb-3 p-3 bg-red-500/10 border border-red-500/30 rounded-lg
+                              text-red-300 text-xs font-body">
+                {addError}
+              </div>
+            )}
+
+            <p className="text-muted/60 text-[11px] font-body mb-3 leading-relaxed">
+              Позиция и её цена создаются одной операцией. Без цены сырьё не добавляется.
+            </p>
+
+            <button
+              onClick={createMaterial}
+              disabled={addSaving}
+              className="w-full py-2 rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/30
+                         text-sm font-body hover:bg-emerald-500/25 transition-all disabled:opacity-50"
+            >
+              {addSaving ? 'Сохранение...' : 'Создать позицию'}
+            </button>
+          </div>
+        )}
 
         {/* Панель редактирования */}
         {editRow && (

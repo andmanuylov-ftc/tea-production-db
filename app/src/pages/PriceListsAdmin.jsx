@@ -99,6 +99,7 @@ export default function PriceListsAdmin() {
   const [rows, setRows]             = useState([])
   const [loading, setLoading]       = useState(true)
   const [exportingClient, setExportingClient] = useState(false)
+  const [showVatModal, setShowVatModal] = useState(false)
   const [typeNames, setTypeNames]   = useState({})
   const [search, setSearch]         = useState('')
   const [selected, setSelected]     = useState(new Set())
@@ -289,8 +290,8 @@ export default function PriceListsAdmin() {
     })
   }
 
-  // ---- Простая выгрузка (плоский прайс с 5 клиентскими уровнями, с НДС 22%) ----
-  function exportToXls() {
+  // ---- Простая выгрузка (плоский прайс с 5 клиентскими уровнями, с НДС или без) ----
+  function exportToXls(withVat = true) {
     const today = new Date().toLocaleDateString('ru-RU')
     const exportRows = selCount > 0
       ? filteredRows.filter(r => selected.has(r.sku_article))
@@ -300,10 +301,15 @@ export default function PriceListsAdmin() {
     // Описание идёт после колонок: №, Артикул, Наим., Вес + N тиров
     const DESC_COL = 4 + TIERS.length
 
+    // Функция расчёта цены (с НДС или без) — единая для всех тиров
+    const priceFn = withVat ? calcPriceWithVat : calcPrice
+    const vatLabel = withVat ? 'Цены с НДС 22%, по уровням клиентов' : 'Цены без НДС, по уровням клиентов'
+    const fileVatLabel = withVat ? 'с НДС' : 'без НДС'
+
     const sheetData = [
       ['Прайс-лист ПЧК/ADDIS'],
       [`Дата выгрузки: ${today}`],
-      ['Цены с НДС 22%, по уровням клиентов'],
+      [vatLabel],
       [],
     ]
 
@@ -322,7 +328,7 @@ export default function PriceListsAdmin() {
           item.sku_article ?? '—',
           item.product_name ?? '—',
           formatWeight(item.package_size, item.package_unit),
-          ...TIERS.map(t => calcPriceWithVat(item.total_sku_cost, t.markup)),
+          ...TIERS.map(t => priceFn(item.total_sku_cost, t.markup)),
           descriptions[item.sku_article] ?? '',
         ])
       })
@@ -369,7 +375,7 @@ export default function PriceListsAdmin() {
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Прайс-лист')
     const suffix = selCount > 0 ? ` (${selCount} поз)` : ''
-    XLSX.writeFile(wb, `Прайс-лист ПЧК ADDIS с НДС${suffix} ${today.replace(/\./g, '-')}.xlsx`)
+    XLSX.writeFile(wb, `Прайс-лист ПЧК ADDIS ${fileVatLabel}${suffix} ${today.replace(/\./g, '-')}.xlsx`)
   }
 
   // ---- Клиентский прайс (на базе template_price.xlsx, через ExcelJS) ----
@@ -526,16 +532,16 @@ export default function PriceListsAdmin() {
         )}
 
         <button
-          onClick={exportToXls}
+          onClick={() => setShowVatModal(true)}
           disabled={loading || rows.length === 0}
           className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gold/30
                      bg-gold/10 text-gold text-xs font-body font-medium
                      hover:bg-gold/20 hover:border-gold/50 transition-colors whitespace-nowrap
                      disabled:opacity-40 disabled:cursor-not-allowed"
-          title="Плоский прайс с 5 уровнями клиентских цен (с НДС 22%)"
+          title="Плоский прайс с 5 уровнями клиентских цен — выбор с НДС или без НДС"
         >
           <Download size={14} />
-          {selCount > 0 ? `Выгрузить (${selCount})` : 'Выгрузить прайс-лист'}
+          {selCount > 0 ? `Выгрузить (${selCount})…` : 'Выгрузить прайс-лист…'}
         </button>
 
         <button
@@ -708,6 +714,76 @@ export default function PriceListsAdmin() {
                 })}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Модалка выбора варианта НДС для выгрузки плоского прайса */}
+      {showVatModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={() => setShowVatModal(false)}
+          onKeyDown={e => { if (e.key === 'Escape') setShowVatModal(false) }}
+        >
+          <div
+            className="bg-forest-dark border border-forest-light/40 rounded-xl shadow-2xl p-6 w-full max-w-md mx-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-cream font-display text-lg uppercase tracking-wider">
+                Выгрузка прайс-листа
+              </h2>
+              <button
+                onClick={() => setShowVatModal(false)}
+                className="text-muted hover:text-cream transition-colors"
+                title="Закрыть"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <p className="text-muted text-sm font-body mb-5">
+              Выберите вариант — цены будут пересчитаны соответственно:
+            </p>
+
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={() => { setShowVatModal(false); exportToXls(true) }}
+                className="flex items-start gap-3 p-4 rounded-lg border border-gold/30 bg-gold/5
+                           hover:bg-gold/15 hover:border-gold/60 transition-colors text-left"
+              >
+                <Download size={18} className="text-gold mt-0.5 shrink-0" />
+                <div className="flex-1">
+                  <div className="text-gold font-body font-medium text-sm">С НДС 22%</div>
+                  <div className="text-muted text-xs font-body mt-1">
+                    Розничные / клиентские цены с НДС
+                  </div>
+                </div>
+              </button>
+
+              <button
+                onClick={() => { setShowVatModal(false); exportToXls(false) }}
+                className="flex items-start gap-3 p-4 rounded-lg border border-forest-light/40 bg-forest-light/5
+                           hover:bg-forest-light/15 hover:border-forest-light/60 transition-colors text-left"
+              >
+                <Download size={18} className="text-cream mt-0.5 shrink-0" />
+                <div className="flex-1">
+                  <div className="text-cream font-body font-medium text-sm">Без НДС</div>
+                  <div className="text-muted text-xs font-body mt-1">
+                    Оптовые / партнёрские цены без НДС
+                  </div>
+                </div>
+              </button>
+            </div>
+
+            <div className="flex justify-end mt-5">
+              <button
+                onClick={() => setShowVatModal(false)}
+                className="px-4 py-2 text-muted hover:text-cream font-body text-xs transition-colors"
+              >
+                Отмена
+              </button>
+            </div>
           </div>
         </div>
       )}

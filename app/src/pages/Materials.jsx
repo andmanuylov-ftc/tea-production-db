@@ -47,6 +47,7 @@ export default function Materials() {
   const [rows, setRows]               = useState([])
   const [loading, setLoading]         = useState(true)
   const [search, setSearch]           = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('')
   const [categories, setCategories]   = useState([])
 
   // edit panel
@@ -464,10 +465,15 @@ export default function Materials() {
 
   const catMap = Object.fromEntries(categories.map(c => [c.id, c.name]))
 
-  const filtered = rows.filter(r =>
-    r.article.toLowerCase().includes(search.toLowerCase()) ||
-    r.name.toLowerCase().includes(search.toLowerCase())
-  )
+  const filtered = rows.filter(r => {
+    const q = search.toLowerCase()
+    const matchesText = r.article.toLowerCase().includes(q) || r.name.toLowerCase().includes(q)
+    const matchesCat =
+      categoryFilter === ''       ? true
+      : categoryFilter === '__none__' ? r.category_id == null
+      : r.category_id === categoryFilter
+    return matchesText && matchesCat
+  })
 
   return (
     <div className="p-8">
@@ -496,16 +502,30 @@ export default function Materials() {
         }
       />
 
-      <div className="relative mb-6 w-80">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Поиск по артикулу или названию…"
-          className="w-full bg-forest border border-forest-light/40 rounded-lg pl-9 pr-4 py-2
-                     text-cream text-sm font-body placeholder-muted/60
-                     focus:outline-none focus:border-gold/50"
-        />
+      <div className="flex items-center gap-3 mb-6">
+        <div className="relative w-80">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Поиск по артикулу или названию…"
+            className="w-full bg-forest border border-forest-light/40 rounded-lg pl-9 pr-4 py-2
+                       text-cream text-sm font-body placeholder-muted/60
+                       focus:outline-none focus:border-gold/50"
+          />
+        </div>
+        <select
+          value={categoryFilter}
+          onChange={e => setCategoryFilter(e.target.value)}
+          className="bg-forest border border-forest-light/40 rounded-lg px-3 py-2
+                     text-cream text-sm font-body focus:outline-none focus:border-gold/50"
+        >
+          <option value="">Все категории</option>
+          {categories.map(c => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+          <option value="__none__">Без категории</option>
+        </select>
       </div>
 
       <div className="flex gap-6">

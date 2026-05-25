@@ -53,6 +53,7 @@ export default function Materials() {
   // edit panel
   const [editRow, setEditRow]         = useState(null)
   const [editName, setEditName]       = useState('')
+  const [editCategoryId, setEditCategoryId] = useState('')
   const [editPrice, setEditPrice]     = useState('')
   const [history, setHistory]         = useState([])
   const [histLoading, setHistLoading] = useState(false)
@@ -134,6 +135,7 @@ export default function Materials() {
     setUsageRow(null); setUsage(null); setUsageHistory([]) // закрываем usage если было
     setEditRow(row)
     setEditName(row.name)
+    setEditCategoryId(row.category_id ?? '')
     setEditPrice('')
     setHistory([])
     setHistLoading(true)
@@ -145,8 +147,12 @@ export default function Materials() {
     if (!editRow) return
     setSaving(true)
     const ops = []
-    if (editName.trim() && editName.trim() !== editRow.name) {
-      ops.push(supabase.from('raw_materials').update({ name: editName.trim() }).eq('id', editRow.id))
+    const patch = {}
+    if (editName.trim() && editName.trim() !== editRow.name) patch.name = editName.trim()
+    const newCat = editCategoryId || null
+    if (newCat !== (editRow.category_id ?? null)) patch.category_id = newCat
+    if (Object.keys(patch).length > 0) {
+      ops.push(supabase.from('raw_materials').update(patch).eq('id', editRow.id))
     }
     const priceVal = parseFloat(editPrice.replace(',', '.'))
     if (!isNaN(priceVal) && priceVal > 0) {
@@ -772,6 +778,21 @@ export default function Materials() {
                 className="w-full bg-forest border border-forest-light/40 rounded-lg px-3 py-2
                            text-cream text-sm font-body focus:outline-none focus:border-gold/50"
               />
+            </div>
+
+            <div className="mb-4">
+              <label className="text-muted text-xs font-body block mb-1">Категория</label>
+              <select
+                value={editCategoryId}
+                onChange={e => setEditCategoryId(e.target.value)}
+                className="w-full bg-forest border border-forest-light/40 rounded-lg px-3 py-2
+                           text-cream text-sm font-body focus:outline-none focus:border-gold/50"
+              >
+                <option value="">— без категории —</option>
+                {categories.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
             </div>
 
             <div className="mb-5">

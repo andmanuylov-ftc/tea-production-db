@@ -102,7 +102,7 @@ export default function Materials() {
   async function loadRows() {
     const { data } = await supabase
       .from('raw_materials_with_price')
-      .select('id, article, name, unit, current_price, price_date')
+      .select('id, article, name, unit, category_id, current_price, price_date')
       .order('article')
     if (mounted.current) { setRows(data ?? []); setLoading(false) }
   }
@@ -462,6 +462,8 @@ export default function Materials() {
 
   // ───── Render ─────
 
+  const catMap = Object.fromEntries(categories.map(c => [c.id, c.name]))
+
   const filtered = rows.filter(r =>
     r.article.toLowerCase().includes(search.toLowerCase()) ||
     r.name.toLowerCase().includes(search.toLowerCase())
@@ -514,6 +516,7 @@ export default function Materials() {
               <tr>
                 <th className="bg-forest text-muted text-xs uppercase tracking-widest p-4 font-body text-left rounded-tl-[var(--border-radius-lg)]">Артикул</th>
                 <th className="bg-forest text-muted text-xs uppercase tracking-widest p-4 font-body text-left">Название</th>
+                <th className="bg-forest text-muted text-xs uppercase tracking-widest p-4 font-body text-left">Категория</th>
                 <th className="bg-forest text-muted text-xs uppercase tracking-widest p-4 font-body text-left">Ед.</th>
                 <th className="bg-forest text-muted text-xs uppercase tracking-widest p-4 font-body text-right">Цена без НДС, руб.</th>
                 <th className="bg-forest text-muted text-xs uppercase tracking-widest p-4 font-body text-right">Дата цены</th>
@@ -522,9 +525,9 @@ export default function Materials() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={6} className="p-4 text-muted text-sm font-mono animate-pulse">Загрузка...</td></tr>
+                <tr><td colSpan={7} className="p-4 text-muted text-sm font-mono animate-pulse">Загрузка...</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={6} className="p-8 text-muted text-sm text-center font-body">Ничего не найдено</td></tr>
+                <tr><td colSpan={7} className="p-8 text-muted text-sm text-center font-body">Ничего не найдено</td></tr>
               ) : filtered.map(r => (
                 <tr key={r.id} className={`table-row ${editRow?.id === r.id || usageRow?.id === r.id ? 'bg-gold/5' : ''}`}>
                   <td className="p-4 border-t border-forest-light/20">
@@ -533,6 +536,7 @@ export default function Materials() {
                     </span>
                   </td>
                   <td className="p-4 border-t border-forest-light/20 text-cream text-sm font-body">{r.name}</td>
+                  <td className="p-4 border-t border-forest-light/20 text-muted text-sm font-body">{catMap[r.category_id] ?? '—'}</td>
                   <td className="p-4 border-t border-forest-light/20 text-muted text-sm font-mono">{r.unit}</td>
                   <td className="p-4 border-t border-forest-light/20 text-right font-mono text-sm text-gold">{fmt(r.current_price)}</td>
                   <td className="p-4 border-t border-forest-light/20 text-right font-mono text-xs text-muted">{fmtDate(r.price_date)}</td>

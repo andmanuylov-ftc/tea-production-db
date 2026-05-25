@@ -3,7 +3,71 @@ import { useSearchParams } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 import PageHeader from '../components/PageHeader'
-import { Search, Filter, X, Upload, ImageOff, MoreHorizontal, Pencil, Trash2, Download } from 'lucide-react'
+import { Search, Filter, X, Upload, ImageOff, MoreHorizontal, Pencil, Trash2, Download, Plus, Layers } from 'lucide-react'
+
+const UNITS = ['кг', 'шт', 'г', 'рул', 'погм', 'мл']
+const fmtCost = v => (v == null || !isFinite(v)) ? '—' : `${Number(v).toFixed(2)} руб`
+
+// Поисковый combobox для рецептов / материалов (списки на сотни позиций)
+function Combo({ items, value, onChange, placeholder, getLabel, getSub }) {
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const ref = useRef(null)
+  useEffect(() => {
+    function h(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [])
+  const sel = items.find(i => i.id === value)
+  const ql = q.trim().toLowerCase()
+  const filtered = (ql
+    ? items.filter(i => `${getLabel(i)} ${i.article ?? ''}`.toLowerCase().includes(ql))
+    : items
+  ).slice(0, 50)
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full text-left bg-forest-dark border border-forest-light/40 rounded-lg px-3 py-2
+                   text-sm focus:outline-none focus:border-gold/50 truncate"
+      >
+        {sel
+          ? <span className="text-cream font-body">{getLabel(sel)} <span className="text-muted font-mono text-xs">{sel.article}</span></span>
+          : <span className="text-muted font-body">{placeholder}</span>}
+      </button>
+      {open && (
+        <div className="absolute z-[60] mt-1 w-full bg-forest-dark border border-forest-light/50 rounded-lg shadow-2xl">
+          <div className="p-2 border-b border-forest-light/30">
+            <input
+              autoFocus
+              value={q}
+              onChange={e => setQ(e.target.value)}
+              placeholder="Поиск…"
+              className="w-full bg-forest border border-forest-light/40 rounded px-2 py-1.5
+                         text-cream text-sm font-body focus:outline-none focus:border-gold/50"
+            />
+          </div>
+          <div className="max-h-56 overflow-y-auto">
+            {filtered.length === 0
+              ? <div className="px-3 py-2 text-muted text-xs font-body">Ничего не найдено</div>
+              : filtered.map(i => (
+                <button
+                  key={i.id}
+                  type="button"
+                  onClick={() => { onChange(i.id); setOpen(false); setQ('') }}
+                  className={`w-full text-left px-3 py-2 hover:bg-forest-light/40 transition-colors ${i.id === value ? 'bg-gold/10' : ''}`}
+                >
+                  <div className="text-cream text-sm font-body truncate">{getLabel(i)}</div>
+                  <div className="text-muted text-xs font-mono">{i.article}{getSub ? ` · ${getSub(i)}` : ''}</div>
+                </button>
+              ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function SKUs() {
   const [searchParams] = useSearchParams()
@@ -30,6 +94,18 @@ export default function SKUs() {
   const [deleteSku, setDeleteSku] = useState(null)
   const [saving,    setSaving]    = useState(false)
   const [deleting,  setDeleting]  = useState(false)
+
+  // редактор состава и комплекта
+  const [editComp,   setEditComp]   = useState(null)   // строка SKU, чей состав правим
+  const [compBlend,  setCompBlend]  = useState(null)   // { recipe_id, quantity, unit }
+  const [compPacks,  setCompPacks]  = useState([])     // [{ material_id, quantity, unit }]
+  const [compSaving, setCompSaving] = useState(false)
+  const [compError,  setCompError]  = useState(null)
+
+  // справочники для пикеров (ленивая загрузка один раз)
+  const [allRecipes,   setAllRecipes]   = useState(null) // [{ id, article, name, cost_per_kg }]
+  const [allMaterials, setAllMaterials] = useState(null) // [{ id, article, name, unit, price }]
+  const [refLoading,   setRefLoading]   = useState(false)
 
   useEffect(() => {
     Promise.all([
@@ -128,17 +204,12 @@ export default function SKUs() {
     setExportOpen(false)
   }
 
-  async function openSKU(row) {
-    if (selected?.sku_article === row.sku_article) {
-      setSelected(null); setComponents([]); setCosts({}); return
-    }
-    setSelected(row)
+  async function loadComponents(productId) {
     setLoadingDetail(true)
-
     const { data: comps } = await supabase
       .from('sku_recipe_components')
       .select('quantity, unit, recipes(article, name), raw_materials(id, article, name)')
-      .eq('product_id', row.product_id)
+      .eq('product_id', productId)
 
     const items = comps ?? []
     setComponents(items)
@@ -163,6 +234,14 @@ export default function SKUs() {
     for (const m of (matPrices.data ?? []))   costMap[m.material_id]    = Number(m.price_per_unit)
     setCosts(costMap)
     setLoadingDetail(false)
+  }
+
+  async function openSKU(row) {
+    if (selected?.sku_article === row.sku_article) {
+      setSelected(null); setComponents([]); setCosts({}); return
+    }
+    setSelected(row)
+    await loadComponents(row.product_id)
   }
 
   async function uploadPhoto(e) {
@@ -239,6 +318,100 @@ export default function SKUs() {
     setDeleting(false)
   }
 
+  // ───── Редактор состава и комплекта ─────
+  async function ensureRefData() {
+    if (allRecipes && allMaterials) return
+    setRefLoading(true)
+    const today = new Date().toISOString().slice(0, 10)
+    const [recRes, recCostRes, matRes, matPriceRes] = await Promise.all([
+      supabase.from('recipes').select('id, article, name').eq('is_active', true).order('article'),
+      supabase.from('recipe_cost').select('recipe_id, cost_per_kg'),
+      supabase.from('raw_materials').select('id, article, name, unit').eq('is_active', true).order('article'),
+      supabase.from('material_prices').select('material_id, price_per_unit, valid_from, valid_to'),
+    ])
+
+    const recCostMap = {}
+    for (const r of (recCostRes.data ?? [])) recCostMap[r.recipe_id] = Number(r.cost_per_kg)
+
+    // актуальная цена материала по логике view sku_cost: valid_from<=today, valid_to null|>=today, свежайшая
+    const byMat = {}
+    for (const p of (matPriceRes.data ?? [])) {
+      if (p.valid_from && p.valid_from > today) continue
+      if (p.valid_to && p.valid_to < today) continue
+      const cur = byMat[p.material_id]
+      if (!cur || (p.valid_from ?? '') > (cur.valid_from ?? '')) byMat[p.material_id] = p
+    }
+
+    setAllRecipes((recRes.data ?? []).map(r => ({ ...r, cost_per_kg: recCostMap[r.id] ?? null })))
+    setAllMaterials((matRes.data ?? []).map(m => ({ ...m, price: byMat[m.id] ? Number(byMat[m.id].price_per_unit) : null })))
+    setRefLoading(false)
+  }
+
+  async function startEditComponents(row, e) {
+    if (e) e.stopPropagation()
+    setOpenMenu(null)
+    setCompError(null)
+    setEditComp(row)
+    await ensureRefData()
+    const { data: comps } = await supabase
+      .from('sku_recipe_components')
+      .select('recipe_id, material_id, quantity, unit')
+      .eq('product_id', row.product_id)
+    const blend = (comps ?? []).find(c => c.recipe_id)
+    const packs = (comps ?? []).filter(c => c.material_id)
+    setCompBlend(blend
+      ? { recipe_id: blend.recipe_id, quantity: String(blend.quantity), unit: blend.unit }
+      : { recipe_id: '', quantity: '0.5', unit: 'кг' })
+    setCompPacks(packs.map(p => ({ material_id: p.material_id, quantity: String(p.quantity), unit: p.unit })))
+  }
+
+  async function saveComponents() {
+    if (!editComp) return
+    setCompError(null)
+    // валидация
+    if (!compBlend?.recipe_id) { setCompError('Выберите рецепт купажа'); return }
+    const bq = Number(compBlend.quantity)
+    if (!isFinite(bq) || bq <= 0) { setCompError('Количество купажа должно быть больше 0'); return }
+    for (const p of compPacks) {
+      if (!p.material_id) { setCompError('У каждой строки упаковки должен быть выбран материал'); return }
+      const q = Number(p.quantity)
+      if (!isFinite(q) || q <= 0) { setCompError('Количество упаковки должно быть больше 0'); return }
+    }
+
+    setCompSaving(true)
+    const productId = editComp.product_id
+    const newRows = [
+      { product_id: productId, recipe_id: compBlend.recipe_id, material_id: null, quantity: bq, unit: compBlend.unit },
+      ...compPacks.map(p => ({ product_id: productId, recipe_id: null, material_id: p.material_id, quantity: Number(p.quantity), unit: p.unit })),
+    ]
+
+    const { error: delErr } = await supabase.from('sku_recipe_components').delete().eq('product_id', productId)
+    if (delErr) { setCompError(`Ошибка удаления старого состава: ${delErr.message}`); setCompSaving(false); return }
+    const { error: insErr } = await supabase.from('sku_recipe_components').insert(newRows)
+    if (insErr) { setCompError(`Ошибка записи состава: ${insErr.message}`); setCompSaving(false); return }
+    // держим products.recipe_id в синхроне с купажом
+    await supabase.from('products').update({ recipe_id: compBlend.recipe_id }).eq('id', productId)
+
+    // перечитываем себестоимость из view
+    const { data: costRow } = await supabase
+      .from('sku_cost')
+      .select('blend_cost, packaging_cost, total_sku_cost')
+      .eq('product_id', productId)
+      .single()
+    if (costRow) {
+      setRows(prev => prev.map(r => r.product_id === productId
+        ? { ...r, blend_cost: costRow.blend_cost, packaging_cost: costRow.packaging_cost, total_sku_cost: costRow.total_sku_cost }
+        : r))
+      if (selected?.product_id === productId)
+        setSelected(prev => ({ ...prev, blend_cost: costRow.blend_cost, packaging_cost: costRow.packaging_cost, total_sku_cost: costRow.total_sku_cost }))
+    }
+    // если SKU открыт в правой панели — обновляем её
+    if (selected?.product_id === productId) await loadComponents(productId)
+
+    setCompSaving(false)
+    setEditComp(null)
+  }
+
   const leafTypes = types.filter(t =>
     t.code.split('.').length === 3 || ['1.4','1.5','2.1','3'].includes(t.code)
   )
@@ -263,6 +436,22 @@ export default function SKUs() {
       return pricePerUnit != null ? (pricePerUnit * Number(c.quantity)).toFixed(2) : null
     }
   }
+
+  // предпросмотр себестоимости в редакторе состава
+  const prevBlend = (() => {
+    if (!compBlend?.recipe_id) return null
+    const r = (allRecipes ?? []).find(x => x.id === compBlend.recipe_id)
+    const q = Number(compBlend.quantity)
+    if (!r || r.cost_per_kg == null || !isFinite(q)) return null
+    return r.cost_per_kg * q
+  })()
+  const prevPack = compPacks.reduce((sum, p) => {
+    const m = (allMaterials ?? []).find(x => x.id === p.material_id)
+    const q = Number(p.quantity)
+    if (!m || m.price == null || !isFinite(q)) return sum
+    return sum + m.price * q
+  }, 0)
+  const prevTotal = (prevBlend ?? 0) + prevPack
 
   return (
     <div className="p-8">
@@ -392,6 +581,12 @@ export default function SKUs() {
                           <Pencil size={13} /> Редактировать
                         </button>
                         <button
+                          onClick={e => startEditComponents(r, e)}
+                          className="w-full text-left px-4 py-2 text-sm text-cream hover:bg-forest-light/30 font-body flex items-center gap-2"
+                        >
+                          <Layers size={13} /> Состав и комплект
+                        </button>
+                        <button
                           onClick={e => startDelete(r, e)}
                           className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-red-900/20 font-body flex items-center gap-2"
                         >
@@ -415,9 +610,18 @@ export default function SKUs() {
                   {selected.sku_article}
                 </span>
               </div>
-              <button onClick={() => { setSelected(null); setComponents([]); setCosts({}) }} className="text-muted hover:text-cream transition-colors">
-                <X size={16} />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => startEditComponents(selected)}
+                  title="Изменить состав и комплект"
+                  className="text-muted hover:text-gold transition-colors p-1"
+                >
+                  <Pencil size={14} />
+                </button>
+                <button onClick={() => { setSelected(null); setComponents([]); setCosts({}) }} className="text-muted hover:text-cream transition-colors p-1">
+                  <X size={16} />
+                </button>
+              </div>
             </div>
 
             <div className="mb-5">
@@ -573,6 +777,138 @@ export default function SKUs() {
                 {saving ? 'Сохранение...' : 'Сохранить'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {editComp && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-forest-dark/80 backdrop-blur-sm p-4">
+          <div className="bg-forest border border-forest-light/40 rounded-xl p-6 w-[600px] max-h-[90vh] overflow-y-auto shadow-2xl">
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="font-display text-lg text-cream">Состав и комплект</h3>
+              <button onClick={() => setEditComp(null)} className="text-muted hover:text-cream"><X size={16} /></button>
+            </div>
+            <div className="mb-5">
+              <span className="badge bg-gold/10 text-gold border border-gold/20 font-mono text-xs">{editComp.sku_article}</span>
+              <span className="text-cream text-sm font-body ml-2">{editComp._name ?? editComp.product_name}</span>
+            </div>
+
+            {refLoading && !allRecipes ? (
+              <div className="text-muted text-sm font-mono animate-pulse py-8 text-center">Загрузка справочников…</div>
+            ) : (
+              <>
+                {/* Купаж */}
+                <div className="mb-5">
+                  <div className="text-muted text-xs uppercase tracking-widest font-body mb-2">Купаж (рецепт)</div>
+                  <div className="flex gap-2 items-start">
+                    <div className="flex-1 min-w-0">
+                      <Combo
+                        items={allRecipes ?? []}
+                        value={compBlend?.recipe_id ?? ''}
+                        onChange={id => setCompBlend(b => ({ ...b, recipe_id: id }))}
+                        placeholder="Выберите рецепт…"
+                        getLabel={r => r.name}
+                        getSub={r => r.cost_per_kg != null ? `${Number(r.cost_per_kg).toFixed(2)} ₽/кг` : 'нет цены'}
+                      />
+                    </div>
+                    <input
+                      value={compBlend?.quantity ?? ''}
+                      onChange={e => setCompBlend(b => ({ ...b, quantity: e.target.value }))}
+                      className="w-24 bg-forest-dark border border-forest-light/40 rounded-lg px-3 py-2
+                                 text-cream text-sm font-mono text-right focus:outline-none focus:border-gold/50"
+                    />
+                    <select
+                      value={compBlend?.unit ?? 'кг'}
+                      onChange={e => setCompBlend(b => ({ ...b, unit: e.target.value }))}
+                      className="w-20 bg-forest-dark border border-forest-light/40 rounded-lg px-2 py-2
+                                 text-cream text-sm font-body focus:outline-none focus:border-gold/50 appearance-none"
+                    >
+                      {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Упаковка */}
+                <div className="mb-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-muted text-xs uppercase tracking-widest font-body">Упаковка (материалы)</span>
+                    <button
+                      type="button"
+                      onClick={() => setCompPacks(p => [...p, { material_id: '', quantity: '1', unit: 'шт' }])}
+                      className="text-gold text-xs font-body hover:text-gold/80 flex items-center gap-1"
+                    >
+                      <Plus size={12} /> Добавить материал
+                    </button>
+                  </div>
+                  {compPacks.length === 0 ? (
+                    <div className="text-muted/60 text-xs font-body py-2">Нет упаковки</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {compPacks.map((p, idx) => (
+                        <div key={idx} className="flex gap-2 items-start">
+                          <div className="flex-1 min-w-0">
+                            <Combo
+                              items={allMaterials ?? []}
+                              value={p.material_id}
+                              onChange={id => setCompPacks(arr => arr.map((x, i) => i === idx ? { ...x, material_id: id } : x))}
+                              placeholder="Выберите материал…"
+                              getLabel={m => m.name}
+                              getSub={m => m.price != null ? `${Number(m.price).toFixed(2)} ₽/${m.unit}` : 'нет цены'}
+                            />
+                          </div>
+                          <input
+                            value={p.quantity}
+                            onChange={e => setCompPacks(arr => arr.map((x, i) => i === idx ? { ...x, quantity: e.target.value } : x))}
+                            className="w-24 bg-forest-dark border border-forest-light/40 rounded-lg px-3 py-2
+                                       text-cream text-sm font-mono text-right focus:outline-none focus:border-gold/50"
+                          />
+                          <select
+                            value={p.unit}
+                            onChange={e => setCompPacks(arr => arr.map((x, i) => i === idx ? { ...x, unit: e.target.value } : x))}
+                            className="w-20 bg-forest-dark border border-forest-light/40 rounded-lg px-2 py-2
+                                       text-cream text-sm font-body focus:outline-none focus:border-gold/50 appearance-none"
+                          >
+                            {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => setCompPacks(arr => arr.filter((_, i) => i !== idx))}
+                            className="text-muted hover:text-red-400 p-2"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Предпросмотр себестоимости */}
+                <div className="bg-forest-dark/60 rounded-lg p-3 mb-4 space-y-1">
+                  <div className="flex justify-between text-xs font-body">
+                    <span className="text-muted">Купаж</span>
+                    <span className="font-mono text-cream">{fmtCost(prevBlend)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs font-body">
+                    <span className="text-muted">Упаковка</span>
+                    <span className="font-mono text-cream">{fmtCost(prevPack)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm font-body pt-1 border-t border-forest-light/30">
+                    <span className="text-muted uppercase tracking-widest text-xs">Итого</span>
+                    <span className="font-mono text-gold font-semibold">{fmtCost(prevTotal)}</span>
+                  </div>
+                </div>
+
+                {compError && <div className="text-red-400 text-xs font-body mb-3">{compError}</div>}
+
+                <div className="flex gap-3 justify-end">
+                  <button onClick={() => setEditComp(null)} className="px-4 py-2 text-sm text-muted hover:text-cream font-body transition-colors">Отмена</button>
+                  <button onClick={saveComponents} disabled={compSaving} className="btn-primary text-sm disabled:opacity-50">
+                    {compSaving ? 'Сохранение…' : 'Сохранить'}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

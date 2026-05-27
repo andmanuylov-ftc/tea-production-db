@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 import PageHeader from '../components/PageHeader'
-import { Search, X, MoreHorizontal, Pencil, Trash2, Plus, FlaskConical } from 'lucide-react'
+import { Search, X, MoreHorizontal, Pencil, Trash2, Plus, FlaskConical, Download } from 'lucide-react'
 
 export default function Recipes() {
   const [searchParams] = useSearchParams()
@@ -231,6 +232,72 @@ export default function Recipes() {
     setDeleting(false)
   }
 
+  // ── Экспорт открытого рецепта в Excel ──
+  // Принимает массив рецептов (сейчас всегда один открытый) — каждый ляжет на отдельный лист.
+  function exportRecipesXlsx(recipeList) {
+    if (!recipeList || recipeList.length === 0) return
+    const wb = XLSX.utils.book_new()
+    const usedSheetNames = new Set()
+
+    for (const rec of recipeList) {
+      const { article, name, ings } = rec
+      const aoa = []
+      aoa.push([name || 'Рецепт', null, null, null, null, null, article || ''])
+      const total = ings.reduce((sum, i) => i.line_cost != null ? sum + i.line_cost : sum, 0)
+      const perKg = ings.length > 0 ? total : 0
+      aoa.push(['Себестоимость, ₽/кг:', null, null, null, null, null, Number(perKg.toFixed(2))])
+      aoa.push([])
+      aoa.push(['Артикул', 'Ингредиент', 'Тип', 'Кол-во', 'Ед.', 'Цена/ед., ₽', 'Стоимость, ₽'])
+
+      for (const ing of ings) {
+        const isSub = !!ing.sub_recipe
+        const cname = ing.raw_materials?.name ?? ing.sub_recipe?.name ?? '—'
+        const cart  = ing.raw_materials?.article ?? ing.sub_recipe?.article ?? ''
+        aoa.push([
+          cart,
+          cname,
+          isSub ? 'подрецепт' : 'сырьё',
+          Number(parseFloat(ing.quantity) || 0),
+          ing.unit || '',
+          ing.unit_price != null ? Number(Number(ing.unit_price).toFixed(2)) : null,
+          ing.line_cost  != null ? Number(Number(ing.line_cost).toFixed(2))  : null,
+        ])
+      }
+      aoa.push([])
+      aoa.push([null, null, null, null, null, 'ИТОГО:', Number(total.toFixed(2))])
+
+      const ws = XLSX.utils.aoa_to_sheet(aoa)
+      ws['!cols'] = [
+        { wch: 12 }, { wch: 38 }, { wch: 11 }, { wch: 9 }, { wch: 6 }, { wch: 13 }, { wch: 14 },
+      ]
+      ws['!freeze'] = { xSplit: 0, ySplit: 4, topLeftCell: 'A5', activePane: 'bottomLeft', state: 'frozen' }
+
+      // Имя листа = артикул, очищенное от запрещённых символов и <=31 симв.
+      let sheetName = (article || 'Рецепт').replace(/[\\/?*[\]:]/g, '-').slice(0, 31)
+      let uniq = sheetName, k = 2
+      while (usedSheetNames.has(uniq)) { uniq = (sheetName.slice(0, 28) + '_' + k).slice(0, 31); k++ }
+      usedSheetNames.add(uniq)
+      XLSX.utils.book_append_sheet(wb, ws, uniq)
+    }
+
+    const first = recipeList[0]
+    const safe = (first.name || 'recipe').replace(/[\\/?*[\]:"<>|]/g, '').replace(/\s+/g, '_').slice(0, 60)
+    const fname = recipeList.length === 1
+      ? `Рецепт_${first.article}_${safe}.xlsx`
+      : `Рецепты_${recipeList.length}.xlsx`
+    XLSX.writeFile(wb, fname)
+  }
+
+  function handleExportOpen() {
+    if (!selected || ingredients.length === 0) return
+    const row = rows.find(r => r.recipe_article === selected)
+    exportRecipesXlsx([{
+      article: selected,
+      name: row?.recipe_name ?? selected,
+      ings: ingredients,
+    }])
+  }
+
   const filtered = rows.filter(r =>
     r.recipe_article.toLowerCase().includes(search.toLowerCase()) ||
     r.recipe_name.toLowerCase().includes(search.toLowerCase())
@@ -319,9 +386,19 @@ export default function Recipes() {
                 Состав рецепта
                 <span className="ml-2 badge bg-gold/10 text-gold border border-gold/20 font-mono text-xs">{selected}</span>
               </h3>
-              <button onClick={() => { setSelected(null); setIngredients([]) }} className="text-muted hover:text-cream transition-colors">
-                <X size={16} />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={handleExportOpen}
+                  disabled={ingredients.length === 0}
+                  title="Скачать рецепт в Excel"
+                  className="text-muted hover:text-gold transition-colors p-1 rounded hover:bg-forest-light/30 disabled:opacity-40 disabled:hover:text-muted"
+                >
+                  <Download size={15} />
+                </button>
+                <button onClick={() => { setSelected(null); setIngredients([]) }} className="text-muted hover:text-cream transition-colors">
+                  <X size={16} />
+                </button>
+              </div>
             </div>
 
             {/* Заголовок колонок */}

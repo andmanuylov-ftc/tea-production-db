@@ -3,7 +3,17 @@ import { useSearchParams } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 import PageHeader from '../components/PageHeader'
-import { Search, X, MoreHorizontal, Pencil, Trash2, Plus, FlaskConical, Download } from 'lucide-react'
+import { Search, X, MoreHorizontal, Pencil, Trash2, Plus, FlaskConical, Download, Upload, Image as ImageIcon } from 'lucide-react'
+
+const PHOTO_BUCKET = 'sku-photos'
+
+// Достаёт путь объекта в бакете из публичного URL (для удаления старого файла)
+function storagePathFromUrl(url) {
+  if (!url) return null
+  const marker = `/${PHOTO_BUCKET}/`
+  const i = url.indexOf(marker)
+  return i === -1 ? null : url.slice(i + marker.length)
+}
 
 export default function Recipes() {
   const [searchParams] = useSearchParams()
@@ -12,6 +22,13 @@ export default function Recipes() {
   const [search, setSearch]     = useState('')
   const [selected, setSelected] = useState(null)
   const [ingredients, setIngredients] = useState([])
+
+  // photo
+  const [selectedId,     setSelectedId]     = useState(null)
+  const [photoUrl,       setPhotoUrl]       = useState(null)
+  const [photoUploading, setPhotoUploading] = useState(false)
+  const [photoError,     setPhotoError]     = useState('')
+  const photoInputRef = useRef(null)
 
   // menu / delete
   const [openMenu,     setOpenMenu]     = useState(null)
@@ -49,10 +66,13 @@ export default function Recipes() {
   }, [searchParams])
 
   async function openRecipe(article) {
-    if (selected === article) { setSelected(null); setIngredients([]); return }
+    if (selected === article) { setSelected(null); setIngredients([]); setSelectedId(null); setPhotoUrl(null); setPhotoError(''); return }
     setSelected(article)
-    const { data: rec } = await supabase.from('recipes').select('id').eq('article', article).single()
-    if (!rec) return
+    setPhotoError('')
+    const { data: rec } = await supabase.from('recipes').select('id, photo_url').eq('article', article).single()
+    if (!rec) { setSelectedId(null); setPhotoUrl(null); return }
+    setSelectedId(rec.id)
+    setPhotoUrl(rec.photo_url ?? null)
 
     const { data } = await supabase
       .from('recipe_ingredients')
@@ -91,6 +111,63 @@ export default function Recipes() {
     })
 
     setIngredients(enriched)
+  }
+
+  // ── Photo: upload / replace ──
+  async function handlePhotoSelect(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''               // позволяет выбрать тот же файл повторно
+    if (!file || !selectedId) return
+    setPhotoError('')
+
+    const okTypes = ['image/jpeg', 'image/png', 'image/webp']
+    if (!okTypes.includes(file.type)) { setPhotoError('Только JPG, PNG или WebP'); return }
+    if (file.size > 5 * 1024 * 1024)  { setPhotoError('Файл больше 5 МБ'); return }
+
+    setPhotoUploading(true)
+    try {
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase()
+      const safeArticle = String(selected).replace(/[^a-zA-Z0-9_-]+/g, '_')
+      const path = `recipes/${safeArticle}-${Date.now()}.${ext}`
+
+      const { error: upErr } = await supabase.storage.from(PHOTO_BUCKET)
+        .upload(path, file, { cacheControl: '3600', upsert: false, contentType: file.type })
+      if (upErr) throw upErr
+
+      const { data: pub } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path)
+      const newUrl = pub.publicUrl
+
+      const { error: dbErr } = await supabase.from('recipes').update({ photo_url: newUrl }).eq('id', selectedId)
+      if (dbErr) throw dbErr
+
+      // удалить прежний файл, если это была замена
+      const oldPath = storagePathFromUrl(photoUrl)
+      if (oldPath && oldPath !== path) await supabase.storage.from(PHOTO_BUCKET).remove([oldPath])
+
+      setPhotoUrl(newUrl)
+    } catch (err) {
+      setPhotoError(err.message || 'Ошибка загрузки')
+    } finally {
+      setPhotoUploading(false)
+    }
+  }
+
+  // ── Photo: remove ──
+  async function handlePhotoRemove() {
+    if (!selectedId || !photoUrl) return
+    setPhotoError('')
+    setPhotoUploading(true)
+    try {
+      const { error: dbErr } = await supabase.from('recipes').update({ photo_url: null }).eq('id', selectedId)
+      if (dbErr) throw dbErr
+      const oldPath = storagePathFromUrl(photoUrl)
+      if (oldPath) await supabase.storage.from(PHOTO_BUCKET).remove([oldPath])
+      setPhotoUrl(null)
+    } catch (err) {
+      setPhotoError(err.message || 'Ошибка удаления')
+    } finally {
+      setPhotoUploading(false)
+    }
   }
 
   // ── Start Edit ──
@@ -227,7 +304,7 @@ export default function Recipes() {
     await supabase.from('recipe_ingredients').delete().eq('recipe_id', deleteRecipe.recipe_id)
     await supabase.from('recipes').delete().eq('id', deleteRecipe.recipe_id)
     setRows(prev => prev.filter(r => r.recipe_id !== deleteRecipe.recipe_id))
-    if (selected === deleteRecipe.recipe_article) { setSelected(null); setIngredients([]) }
+    if (selected === deleteRecipe.recipe_article) { setSelected(null); setIngredients([]); setSelectedId(null); setPhotoUrl(null) }
     setDeleteRecipe(null)
     setDeleting(false)
   }
@@ -395,10 +472,67 @@ export default function Recipes() {
                 >
                   <Download size={15} />
                 </button>
-                <button onClick={() => { setSelected(null); setIngredients([]) }} className="text-muted hover:text-cream transition-colors">
+                <button onClick={() => { setSelected(null); setIngredients([]); setSelectedId(null); setPhotoUrl(null); setPhotoError('') }} className="text-muted hover:text-cream transition-colors">
                   <X size={16} />
                 </button>
               </div>
+            </div>
+
+            {/* Фото купажа */}
+            <div className="mb-4">
+              {photoUrl ? (
+                <div className="relative group">
+                  <img
+                    src={photoUrl}
+                    alt="Фото купажа"
+                    className="w-full h-44 object-cover rounded-lg border border-forest-light/30"
+                  />
+                  <div className="absolute inset-0 rounded-lg flex items-center justify-center gap-2
+                                  bg-forest-dark/0 group-hover:bg-forest-dark/50 opacity-0 group-hover:opacity-100 transition-all">
+                    <button
+                      onClick={() => photoInputRef.current?.click()}
+                      disabled={photoUploading}
+                      className="bg-forest/90 border border-forest-light/40 text-cream text-xs font-body
+                                 px-3 py-1.5 rounded-lg hover:border-gold/50 flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      <Upload size={12} /> Заменить
+                    </button>
+                    <button
+                      onClick={handlePhotoRemove}
+                      disabled={photoUploading}
+                      className="bg-red-900/70 border border-red-800/50 text-red-100 text-xs font-body
+                                 px-3 py-1.5 rounded-lg hover:bg-red-800/70 flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      <Trash2 size={12} /> Удалить
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => photoInputRef.current?.click()}
+                  disabled={photoUploading}
+                  className="w-full h-32 rounded-lg border border-dashed border-forest-light/40 hover:border-gold/50
+                             flex flex-col items-center justify-center gap-2 text-muted hover:text-gold transition-colors disabled:opacity-50"
+                >
+                  {photoUploading
+                    ? <div className="w-5 h-5 border-2 border-gold/60 border-t-transparent rounded-full animate-spin" />
+                    : <><ImageIcon size={20} /><span className="text-xs font-body">Загрузить фото купажа</span></>
+                  }
+                </button>
+              )}
+              {photoUploading && photoUrl && (
+                <div className="text-muted text-xs font-mono mt-1.5 flex items-center gap-1.5">
+                  <div className="w-3 h-3 border border-gold/60 border-t-transparent rounded-full animate-spin" /> Обработка…
+                </div>
+              )}
+              {photoError && <div className="text-red-400 text-xs font-body mt-1.5">{photoError}</div>}
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={handlePhotoSelect}
+                className="hidden"
+              />
             </div>
 
             {/* Заголовок колонок */}

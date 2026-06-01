@@ -18,6 +18,7 @@ function storagePathFromUrl(url) {
 export default function Recipes() {
   const [searchParams] = useSearchParams()
   const [rows, setRows]         = useState([])
+  const [photoMap, setPhotoMap] = useState({})   // recipe_id -> photo_url (для миниатюр в таблице)
   const [loading, setLoading]   = useState(true)
   const [search, setSearch]     = useState('')
   const [selected, setSelected] = useState(null)
@@ -56,7 +57,20 @@ export default function Recipes() {
       .from('recipe_cost')
       .select('recipe_id, recipe_article, recipe_name, total_cost')
       .order('recipe_article')
-      .then(({ data }) => { setRows(data ?? []); setLoading(false) })
+      .then(({ data }) => {
+        setRows(data ?? [])
+        setLoading(false)
+        // подтянуть фото для миниатюр (только непустые)
+        supabase
+          .from('recipes')
+          .select('id, photo_url')
+          .not('photo_url', 'is', null)
+          .then(({ data: photos }) => {
+            const map = {}
+            ;(photos ?? []).forEach(p => { if (p.photo_url) map[p.id] = p.photo_url })
+            setPhotoMap(map)
+          })
+      })
   }, [])
 
   // Предзаполнение поиска из URL ?q= (для перехода со страницы Сырьё → Где используется)
@@ -145,6 +159,7 @@ export default function Recipes() {
       if (oldPath && oldPath !== path) await supabase.storage.from(PHOTO_BUCKET).remove([oldPath])
 
       setPhotoUrl(newUrl)
+      if (selectedId) setPhotoMap(prev => ({ ...prev, [selectedId]: newUrl }))
     } catch (err) {
       setPhotoError(err.message || 'Ошибка загрузки')
     } finally {
@@ -163,6 +178,7 @@ export default function Recipes() {
       const oldPath = storagePathFromUrl(photoUrl)
       if (oldPath) await supabase.storage.from(PHOTO_BUCKET).remove([oldPath])
       setPhotoUrl(null)
+      if (selectedId) setPhotoMap(prev => { const n = { ...prev }; delete n[selectedId]; return n })
     } catch (err) {
       setPhotoError(err.message || 'Ошибка удаления')
     } finally {
@@ -304,6 +320,7 @@ export default function Recipes() {
     await supabase.from('recipe_ingredients').delete().eq('recipe_id', deleteRecipe.recipe_id)
     await supabase.from('recipes').delete().eq('id', deleteRecipe.recipe_id)
     setRows(prev => prev.filter(r => r.recipe_id !== deleteRecipe.recipe_id))
+    setPhotoMap(prev => { const n = { ...prev }; delete n[deleteRecipe.recipe_id]; return n })
     if (selected === deleteRecipe.recipe_article) { setSelected(null); setIngredients([]); setSelectedId(null); setPhotoUrl(null) }
     setDeleteRecipe(null)
     setDeleting(false)
@@ -409,6 +426,7 @@ export default function Recipes() {
           <table className="w-full">
             <thead className="bg-forest">
               <tr className="text-left">
+                <th className="w-14 p-4"></th>
                 <th className="text-muted text-xs uppercase tracking-widest p-4 font-body">Артикул</th>
                 <th className="text-muted text-xs uppercase tracking-widest p-4 font-body">Название</th>
                 <th className="text-muted text-xs uppercase tracking-widest p-4 font-body text-right">руб/кг</th>
@@ -417,13 +435,27 @@ export default function Recipes() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={4} className="p-4 text-muted text-sm font-mono animate-pulse">Загрузка...</td></tr>
+                <tr><td colSpan={5} className="p-4 text-muted text-sm font-mono animate-pulse">Загрузка...</td></tr>
               ) : filtered.map(r => (
                 <tr
                   key={r.recipe_article}
                   className={`table-row cursor-pointer ${selected === r.recipe_article ? 'bg-gold/10' : ''}`}
                   onClick={() => openRecipe(r.recipe_article)}
                 >
+                  <td className="pl-4 pr-0 py-2">
+                    {photoMap[r.recipe_id] ? (
+                      <img
+                        src={photoMap[r.recipe_id]}
+                        alt=""
+                        loading="lazy"
+                        className="w-10 h-10 rounded-md object-cover border border-forest-light/30"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-md border border-dashed border-forest-light/25 flex items-center justify-center">
+                        <ImageIcon size={13} className="text-muted/30" />
+                      </div>
+                    )}
+                  </td>
                   <td className="p-4">
                     <span className="badge bg-gold/10 text-gold border border-gold/20 font-mono">{r.recipe_article}</span>
                   </td>

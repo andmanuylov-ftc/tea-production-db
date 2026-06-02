@@ -7,6 +7,7 @@ import { Search, Filter, X, Upload, ImageOff, MoreHorizontal, Pencil, Trash2, Do
 
 const UNITS = ['кг', 'шт', 'г', 'рул', 'погм', 'мл']
 const fmtCost = v => (v == null || !isFinite(v)) ? '—' : `${Number(v).toFixed(2)} руб`
+const VAT = 0.22
 
 // Поисковый combobox для рецептов / материалов (списки на сотни позиций)
 function Combo({ items, value, onChange, placeholder, getLabel, getSub }) {
@@ -534,14 +535,15 @@ export default function SKUs() {
                 <th className="text-muted text-xs uppercase tracking-widest p-4 font-body text-right">Купаж</th>
                 <th className="text-muted text-xs uppercase tracking-widest p-4 font-body text-right">Упаковка</th>
                 <th className="text-muted text-xs uppercase tracking-widest p-4 font-body text-right">Итого, руб</th>
+                <th className="text-muted text-xs uppercase tracking-widest p-4 font-body text-right">Итого с НДС, руб</th>
                 <th className="w-10"></th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={7} className="p-4 text-muted text-sm font-mono animate-pulse">Загрузка...</td></tr>
+                <tr><td colSpan={8} className="p-4 text-muted text-sm font-mono animate-pulse">Загрузка...</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={7} className="p-8 text-muted text-sm text-center font-body">Ничего не найдено</td></tr>
+                <tr><td colSpan={8} className="p-8 text-muted text-sm text-center font-body">Ничего не найдено</td></tr>
               ) : filtered.map(r => (
                 <tr
                   key={r.sku_article}
@@ -565,6 +567,7 @@ export default function SKUs() {
                   <td className="p-4 text-right font-mono text-sm text-muted">{Number(r.blend_cost).toFixed(2)}</td>
                   <td className="p-4 text-right font-mono text-sm text-muted">{Number(r.packaging_cost).toFixed(2)}</td>
                   <td className="p-4 text-right font-mono text-sm font-semibold text-gold">{Number(r.total_sku_cost).toFixed(2)}</td>
+                  <td className="p-4 text-right font-mono text-sm text-cream">{(Number(r.total_sku_cost) * (1 + VAT)).toFixed(2)}</td>
                   <td className="pr-3 text-right relative" onClick={e => e.stopPropagation()}>
                     <button
                       onClick={() => setOpenMenu(openMenu === r.sku_article ? null : r.sku_article)}

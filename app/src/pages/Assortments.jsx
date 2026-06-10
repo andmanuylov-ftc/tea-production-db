@@ -88,7 +88,7 @@ export default function Assortments() {
             return (
               <button
                 key={a.code}
-                onClick={() => navigate(`/assortments/${a.code}`)}
+                onClick={() => navigate(a.code === 'OLD_TEA' ? '/dashboard' : `/assortments/${a.code}`)}
                 className={`card text-left group hover:border-gold/40 transition-all hover:scale-[1.01] p-6 border ${m.border}`}
               >
                 <div className="flex items-start justify-between mb-4">

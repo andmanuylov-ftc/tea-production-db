@@ -2,6 +2,7 @@ import { Routes, Route } from 'react-router-dom'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 import RootRedirect from './components/RootRedirect'
+import { AssortmentProvider } from './contexts/AssortmentContext'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Recipes from './pages/Recipes'
@@ -20,43 +21,45 @@ const adminOnly = (el) => <ProtectedRoute adminOnly>{el}</ProtectedRoute>
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/login" element={<Login />} />
+    <AssortmentProvider>
+      <Routes>
+        <Route path="/login" element={<Login />} />
 
-      {/* Стартовый лаунчер ассортиментов — без сайдбара */}
-      <Route
-        path="/assortments"
-        element={
-          <ProtectedRoute adminOnly>
-            <Assortments />
-          </ProtectedRoute>
-        }
-      />
+        {/* Стартовый лаунчер ассортиментов — без сайдбара */}
+        <Route
+          path="/assortments"
+          element={
+            <ProtectedRoute adminOnly>
+              <Assortments />
+            </ProtectedRoute>
+          }
+        />
 
-      {/* Рабочий интерфейс — внутри Layout (с боковым меню) */}
-      <Route
-        path="/*"
-        element={
-          <ProtectedRoute>
-            <Layout>
-              <Routes>
-                <Route path="/" element={<RootRedirect />} />
-                <Route path="/pricelists" element={<PriceLists />} />
-                <Route path="/assortments/:code" element={adminOnly(<AssortmentDetail />)} />
-                <Route path="/dashboard" element={adminOnly(<Dashboard />)} />
-                <Route path="/recipes" element={adminOnly(<Recipes />)} />
-                <Route path="/skus" element={adminOnly(<SKUs />)} />
-                <Route path="/materials" element={adminOnly(<Materials />)} />
-                <Route path="/materials/import" element={adminOnly(<MaterialsImport />)} />
-                <Route path="/constructor" element={adminOnly(<Constructor />)} />
-                <Route path="/project" element={adminOnly(<Project />)} />
-                <Route path="/descriptions" element={adminOnly(<Descriptions />)} />
-                <Route path="/admin/managers" element={adminOnly(<AdminManagers />)} />
-              </Routes>
-            </Layout>
-          </ProtectedRoute>
-        }
-      />
-    </Routes>
+        {/* Рабочий интерфейс — внутри Layout (с боковым меню) */}
+        <Route
+          path="/*"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <Routes>
+                  <Route path="/" element={<RootRedirect />} />
+                  <Route path="/pricelists" element={<PriceLists />} />
+                  <Route path="/assortments/:code" element={adminOnly(<AssortmentDetail />)} />
+                  <Route path="/dashboard" element={adminOnly(<Dashboard />)} />
+                  <Route path="/recipes" element={adminOnly(<Recipes />)} />
+                  <Route path="/skus" element={adminOnly(<SKUs />)} />
+                  <Route path="/materials" element={adminOnly(<Materials />)} />
+                  <Route path="/materials/import" element={adminOnly(<MaterialsImport />)} />
+                  <Route path="/constructor" element={adminOnly(<Constructor />)} />
+                  <Route path="/project" element={adminOnly(<Project />)} />
+                  <Route path="/descriptions" element={adminOnly(<Descriptions />)} />
+                  <Route path="/admin/managers" element={adminOnly(<AdminManagers />)} />
+                </Routes>
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+      </Routes>
+    </AssortmentProvider>
   )
 }

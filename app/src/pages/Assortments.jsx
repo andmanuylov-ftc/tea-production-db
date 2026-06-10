@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { useAssortment } from '../contexts/AssortmentContext'
 import PageHeader from '../components/PageHeader'
 import { Archive, Sparkles, FolderOpen, Tag, ChevronRight } from 'lucide-react'
 
@@ -43,6 +44,7 @@ const PROJECTS_META = {
 
 export default function Assortments() {
   const navigate = useNavigate()
+  const { setAssortment } = useAssortment()
   const [assortments, setAssortments]     = useState([])
   const [counts, setCounts]               = useState({})
   const [projectCounts, setProjectCounts] = useState({ sku: 0, recipes: 0 })
@@ -79,6 +81,16 @@ export default function Assortments() {
     load()
   }, [])
 
+  function enterAssortment(a, label) {
+    setAssortment({ code: a.code, id: a.id, name: label })
+    navigate(a.code === 'OLD_TEA' ? '/dashboard' : `/assortments/${a.code}`)
+  }
+
+  function enterProjects() {
+    setAssortment(null)
+    navigate('/project')
+  }
+
   const PIcon = PROJECTS_META.icon
 
   return (
@@ -96,7 +108,7 @@ export default function Assortments() {
             return (
               <button
                 key={a.code}
-                onClick={() => navigate(a.code === 'OLD_TEA' ? '/dashboard' : `/assortments/${a.code}`)}
+                onClick={() => enterAssortment(a, m.label)}
                 className={`card text-left group hover:border-gold/40 transition-all hover:scale-[1.01] p-6 border ${m.border}`}
               >
                 <div className="flex items-start justify-between mb-4">
@@ -129,7 +141,7 @@ export default function Assortments() {
 
           {/* Карточка: Проекты */}
           <button
-            onClick={() => navigate('/project')}
+            onClick={enterProjects}
             className={`card text-left group hover:border-gold/40 transition-all hover:scale-[1.01] p-6 border ${PROJECTS_META.border}`}
           >
             <div className="flex items-start justify-between mb-4">

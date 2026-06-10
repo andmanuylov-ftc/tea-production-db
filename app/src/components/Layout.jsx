@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard,
   FlaskConical,
@@ -15,6 +15,7 @@ import {
   LogOut,
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import { useAssortment } from '../contexts/AssortmentContext'
 import ChangePasswordModal from './ChangePasswordModal'
 
 const nav = [
@@ -32,6 +33,8 @@ const nav = [
 
 export default function Layout({ children }) {
   const { profile, signOut } = useAuth()
+  const { assortment } = useAssortment()
+  const navigate = useNavigate()
   const isAdmin = profile?.role === 'admin'
   const items = nav.filter((i) => isAdmin || !i.adminOnly)
   const [showChangePassword, setShowChangePassword] = useState(false)
@@ -50,6 +53,18 @@ export default function Layout({ children }) {
             </div>
           </div>
         </div>
+
+        {isAdmin && assortment && (
+          <button
+            onClick={() => navigate('/assortments')}
+            title="Сменить ассортимент"
+            className="mx-3 mt-3 mb-1 px-3 py-2.5 rounded-lg bg-gold/10 border border-gold/20 text-left hover:bg-gold/15 transition-all"
+          >
+            <div className="text-muted text-[10px] font-body uppercase tracking-widest">Ассортимент</div>
+            <div className="text-gold text-sm font-display font-semibold leading-tight truncate">{assortment.name}</div>
+            <div className="text-muted text-[10px] font-body mt-0.5">Сменить →</div>
+          </button>
+        )}
 
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {items.map(({ to, label, icon: Icon }) => (

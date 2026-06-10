@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
+import { useAssortment } from '../contexts/AssortmentContext'
 import PageHeader from '../components/PageHeader'
 import { Search, Filter, X, Upload, ImageOff, MoreHorizontal, Pencil, Trash2, Download, Plus, Layers } from 'lucide-react'
 
@@ -72,6 +73,8 @@ function Combo({ items, value, onChange, placeholder, getLabel, getSub }) {
 
 export default function SKUs() {
   const [searchParams] = useSearchParams()
+  const { assortment } = useAssortment()
+  const [allowedProductIds, setAllowedProductIds] = useState(null) // null = без фильтра
   const [rows, setRows]             = useState([])
   const [types, setTypes]           = useState([])
   const [loading, setLoading]       = useState(true)
@@ -137,6 +140,21 @@ export default function SKUs() {
       setLoading(false)
     })
   }, [])
+
+  // Фильтр по активному ассортименту: какие product_id в него входят
+  useEffect(() => {
+    if (!assortment?.id) { setAllowedProductIds(null); return }
+    let cancelled = false
+    supabase
+      .from('assortment_products')
+      .select('product_id')
+      .eq('assortment_id', assortment.id)
+      .then(({ data }) => {
+        if (cancelled) return
+        setAllowedProductIds(new Set((data ?? []).map(r => r.product_id)))
+      })
+    return () => { cancelled = true }
+  }, [assortment?.id])
 
   // Предзаполнение поиска из URL ?q=
   useEffect(() => {
@@ -417,7 +435,8 @@ export default function SKUs() {
     t.code.split('.').length === 3 || ['1.4','1.5','2.1','3'].includes(t.code)
   )
 
-  const filtered = rows.filter(r => {
+  const scopedRows = allowedProductIds ? rows.filter(r => allowedProductIds.has(r.product_id)) : rows
+  const filtered = scopedRows.filter(r => {
     const matchSearch =
       r.sku_article.toLowerCase().includes(search.toLowerCase()) ||
       r.product_name.toLowerCase().includes(search.toLowerCase())
@@ -458,7 +477,7 @@ export default function SKUs() {
     <div className="p-8">
       <PageHeader
         title="SKU"
-        subtitle={`${rows.length} позиций`}
+        subtitle={`${scopedRows.length} позиций${assortment ? ` · ${assortment.name}` : ''}`}
         action={
           <div className="relative" ref={exportRef}>
             <button

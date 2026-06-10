@@ -23,6 +23,17 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
 
+      {/* Стартовый лаунчер ассортиментов — без сайдбара */}
+      <Route
+        path="/assortments"
+        element={
+          <ProtectedRoute adminOnly>
+            <Assortments />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Рабочий интерфейс — внутри Layout (с боковым меню) */}
       <Route
         path="/*"
         element={
@@ -31,7 +42,6 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<RootRedirect />} />
                 <Route path="/pricelists" element={<PriceLists />} />
-                <Route path="/assortments" element={adminOnly(<Assortments />)} />
                 <Route path="/assortments/:code" element={adminOnly(<AssortmentDetail />)} />
                 <Route path="/dashboard" element={adminOnly(<Dashboard />)} />
                 <Route path="/recipes" element={adminOnly(<Recipes />)} />

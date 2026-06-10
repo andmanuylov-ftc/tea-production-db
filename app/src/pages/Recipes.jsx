@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
+import { useAssortment } from '../contexts/AssortmentContext'
 import PageHeader from '../components/PageHeader'
 import { Search, X, MoreHorizontal, Pencil, Trash2, Plus, FlaskConical, Download, Upload, Image as ImageIcon } from 'lucide-react'
 
@@ -17,6 +18,8 @@ function storagePathFromUrl(url) {
 
 export default function Recipes() {
   const [searchParams] = useSearchParams()
+  const { assortment } = useAssortment()
+  const [allowedIds, setAllowedIds] = useState(null) // null = без фильтра (показать все)
   const [rows, setRows]         = useState([])
   const [photoMap, setPhotoMap] = useState({})   // recipe_id -> photo_url (для миниатюр в таблице)
   const [loading, setLoading]   = useState(true)
@@ -72,6 +75,21 @@ export default function Recipes() {
           })
       })
   }, [])
+
+  // Фильтр по активному ассортименту: какие recipe_id в него входят
+  useEffect(() => {
+    if (!assortment?.id) { setAllowedIds(null); return }
+    let cancelled = false
+    supabase
+      .from('assortment_recipes')
+      .select('recipe_id')
+      .eq('assortment_id', assortment.id)
+      .then(({ data }) => {
+        if (cancelled) return
+        setAllowedIds(new Set((data ?? []).map(r => r.recipe_id)))
+      })
+    return () => { cancelled = true }
+  }, [assortment?.id])
 
   // Предзаполнение поиска из URL ?q= (для перехода со страницы Сырьё → Где используется)
   useEffect(() => {
@@ -392,7 +410,8 @@ export default function Recipes() {
     }])
   }
 
-  const filtered = rows.filter(r =>
+  const scopedRows = allowedIds ? rows.filter(r => allowedIds.has(r.recipe_id)) : rows
+  const filtered = scopedRows.filter(r =>
     r.recipe_article.toLowerCase().includes(search.toLowerCase()) ||
     r.recipe_name.toLowerCase().includes(search.toLowerCase())
   )
@@ -405,7 +424,7 @@ export default function Recipes() {
 
   return (
     <div className="p-8">
-      <PageHeader title="Рецепты" subtitle={`${rows.length} купажей в базе`} />
+      <PageHeader title="Рецепты" subtitle={`${scopedRows.length} купажей${assortment ? ` · ${assortment.name}` : ' в базе'}`} />
 
       <div className="relative mb-6 w-80">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />

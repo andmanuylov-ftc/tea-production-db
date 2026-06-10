@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import PageHeader from '../components/PageHeader'
-import { Archive, Sparkles, FolderOpen, ChevronRight } from 'lucide-react'
+import { Archive, Sparkles, FolderOpen, Tag, ChevronRight } from 'lucide-react'
 
 const META = {
   OLD_TEA: {
@@ -20,6 +20,14 @@ const META = {
     border: 'border-emerald-400/20',
     label: 'Новый ассортимент',
     hint: 'Новый ассортимент в разработке',
+  },
+  STM: {
+    icon: Tag,
+    color: 'text-purple-400',
+    bg: 'bg-purple-400/10',
+    border: 'border-purple-400/20',
+    label: 'СТМ',
+    hint: 'Продукция под собственной торговой маркой',
   },
 }
 
@@ -75,7 +83,7 @@ export default function Assortments() {
 
   return (
     <div className="p-8">
-      <PageHeader title="Ассортименты" subtitle="Управление ассортиментами OLD_TEA, NEW_TEA и проектами" />
+      <PageHeader title="Ассортименты" subtitle="Управление ассортиментами OLD_TEA, NEW_TEA, СТМ и проектами" />
 
       {loading ? (
         <p className="text-muted text-sm font-mono animate-pulse">Загрузка...</p>

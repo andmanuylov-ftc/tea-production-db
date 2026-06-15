@@ -20,6 +20,10 @@ export default function Recipes() {
   const [searchParams] = useSearchParams()
   const { assortment } = useAssortment()
   const [allowedIds, setAllowedIds] = useState(null) // null = без фильтра (показать все)
+  const isStm = assortment?.code === 'STM'
+  const [clients, setClients] = useState([])             // [{id,name}] клиенты с SKU в СТМ
+  const [recipeClients, setRecipeClients] = useState({}) // recipe_id -> Set(client_id)
+  const [clientFilter, setClientFilter] = useState('')   // '' = все клиенты
   const [rows, setRows]         = useState([])
   const [photoMap, setPhotoMap] = useState({})   // recipe_id -> photo_url (для миниатюр в таблице)
   const [loading, setLoading]   = useState(true)
@@ -90,6 +94,37 @@ export default function Recipes() {
       })
     return () => { cancelled = true }
   }, [assortment?.id])
+
+  // СТМ: клиенты (папки) + карта recipe_id -> клиенты (через СТМ-SKU)
+  useEffect(() => {
+    if (!isStm || !assortment?.id) {
+      setClients([]); setRecipeClients({}); setClientFilter('')
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      const { data: ap } = await supabase
+        .from('assortment_products')
+        .select('client_id, products(recipe_id)')
+        .eq('assortment_id', assortment.id)
+        .not('client_id', 'is', null)
+      const map = {}
+      const usedClients = new Set()
+      ;(ap ?? []).forEach(row => {
+        if (row.client_id) usedClients.add(row.client_id)
+        const rid = row.products?.recipe_id
+        if (rid && row.client_id) {
+          if (!map[rid]) map[rid] = new Set()
+          map[rid].add(row.client_id)
+        }
+      })
+      const { data: cl } = await supabase.from('clients').select('id, name').order('name')
+      if (cancelled) return
+      setClients((cl ?? []).filter(c => usedClients.has(c.id)))
+      setRecipeClients(map)
+    })()
+    return () => { cancelled = true }
+  }, [assortment?.id, isStm])
 
   // Предзаполнение поиска из URL ?q= (для перехода со страницы Сырьё → Где используется)
   useEffect(() => {
@@ -411,7 +446,10 @@ export default function Recipes() {
   }
 
   const scopedRows = allowedIds ? rows.filter(r => allowedIds.has(r.recipe_id)) : rows
-  const filtered = scopedRows.filter(r =>
+  const clientScoped = (isStm && clientFilter)
+    ? scopedRows.filter(r => recipeClients[r.recipe_id]?.has(clientFilter))
+    : scopedRows
+  const filtered = clientScoped.filter(r =>
     r.recipe_article.toLowerCase().includes(search.toLowerCase()) ||
     r.recipe_name.toLowerCase().includes(search.toLowerCase())
   )
@@ -426,15 +464,29 @@ export default function Recipes() {
     <div className="p-8">
       <PageHeader title="Рецепты" subtitle={`${scopedRows.length} купажей${assortment ? ` · ${assortment.name}` : ' в базе'}`} />
 
-      <div className="relative mb-6 w-80">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Поиск по артикулу или названию…"
-          className="w-full bg-forest border border-forest-light/40 rounded-lg pl-9 pr-4 py-2
-                     text-cream text-sm font-body placeholder-muted/60 focus:outline-none focus:border-gold/50"
-        />
+      <div className="flex gap-3 items-center mb-6 flex-wrap">
+        <div className="relative w-80">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Поиск по артикулу или названию…"
+            className="w-full bg-forest border border-forest-light/40 rounded-lg pl-9 pr-4 py-2
+                       text-cream text-sm font-body placeholder-muted/60 focus:outline-none focus:border-gold/50"
+          />
+        </div>
+        {isStm && (
+          <select
+            value={clientFilter}
+            onChange={e => setClientFilter(e.target.value)}
+            title="Клиент"
+            className="w-60 bg-forest border border-forest-light/40 rounded-lg px-3 py-2
+                       text-cream text-sm font-body focus:outline-none focus:border-gold/50"
+          >
+            <option value="">Все клиенты</option>
+            {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        )}
       </div>
 
       {openMenu && <div className="fixed inset-0 z-40" onClick={() => setOpenMenu(null)} />}

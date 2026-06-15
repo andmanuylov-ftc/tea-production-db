@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx'
 import ExcelJS from 'exceljs'
 import { supabase } from '../lib/supabase'
 import PageHeader from '../components/PageHeader'
+import { useAssortment } from '../contexts/AssortmentContext'
 import { Download, FileText, Search, X, FileSpreadsheet } from 'lucide-react'
 
 // ============================================================================
@@ -105,13 +106,17 @@ export default function PriceListsAdmin() {
   const [selected, setSelected]     = useState(new Set())
   const [needsCheck, setNeedsCheck] = useState(new Set())
   const [descriptions, setDescriptions] = useState({})
+  const { assortment } = useAssortment()
+  const isStm = assortment?.code === 'STM'
+  const [productClient, setProductClient] = useState({}) // product_id -> client_id
+  const [clientNames, setClientNames]     = useState({}) // client_id -> name
   const mounted = useRef(true)
 
   useEffect(() => {
     mounted.current = true
     loadData()
     return () => { mounted.current = false }
-  }, [])
+  }, [assortment?.id])
 
   async function loadData() {
     setLoading(true)
@@ -149,10 +154,34 @@ export default function PriceListsAdmin() {
     })
     setDescriptions(descMap)
 
-    const merged = (skuRes.data ?? []).map(r => ({
+    // Привязка к активному направлению (+ клиенты для СТМ)
+    let allowedIds = null
+    const prodClient = {}
+    const clientMap = {}
+    if (assortment?.id) {
+      const { data: ap } = await supabase
+        .from('assortment_products')
+        .select('product_id, client_id')
+        .eq('assortment_id', assortment.id)
+      if (!mounted.current) return
+      allowedIds = new Set((ap ?? []).map(r => r.product_id))
+      const usedClients = new Set()
+      ;(ap ?? []).forEach(r => {
+        if (r.client_id) { prodClient[r.product_id] = r.client_id; usedClients.add(r.client_id) }
+      })
+      if (usedClients.size) {
+        const { data: cl } = await supabase.from('clients').select('id, name')
+        ;(cl ?? []).forEach(c => { if (usedClients.has(c.id)) clientMap[c.id] = c.name })
+      }
+    }
+    setProductClient(prodClient)
+    setClientNames(clientMap)
+
+    let merged = (skuRes.data ?? []).map(r => ({
       ...r,
       type_id: productTypeMap[r.product_id] ?? null,
     }))
+    if (allowedIds) merged = merged.filter(r => allowedIds.has(r.product_id))
 
     setRows(merged)
     setLoading(false)
@@ -181,7 +210,36 @@ export default function PriceListsAdmin() {
     )
   }
 
+  function groupRowsByClient(rowsToGroup) {
+    const byClient = {}
+    rowsToGroup.forEach(r => {
+      const cid = productClient[r.product_id] || '—'
+      const tid = r.type_id ?? 0
+      if (!byClient[cid]) byClient[cid] = {}
+      if (!byClient[cid][tid]) byClient[cid][tid] = []
+      byClient[cid][tid].push(r)
+    })
+    const clientIds = Object.keys(byClient).sort((a, b) =>
+      (clientNames[a] ?? 'Без клиента').localeCompare(clientNames[b] ?? 'Без клиента'))
+    const groups = []
+    clientIds.forEach(cid => {
+      const cname = clientNames[cid] ?? 'Без клиента'
+      const tids = Object.keys(byClient[cid]).map(Number)
+        .sort((a, b) => getCategorySort(a) - getCategorySort(b))
+      tids.forEach(tid => {
+        groups.push({
+          typeId: `${cid}-${tid}`,
+          name: `${cname} · ${typeNames[tid] ?? `Категория ${tid}`}`,
+          rows: byClient[cid][tid],
+          isPet: false,
+        })
+      })
+    })
+    return groups
+  }
+
   function groupRows(rowsToGroup) {
+    if (isStm) return groupRowsByClient(rowsToGroup)
     const main = {}
     const pet  = []
 

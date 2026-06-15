@@ -38,8 +38,10 @@ export default function Layout({ children }) {
   const isAdmin = profile?.role === 'admin'
   const items = nav.filter((i) => {
     if (i.adminOnly && !isAdmin) return false
-    // Прайс-лист — только в старом ассортименте (у админа); менеджеры видят всегда
-    if (i.to === '/pricelists' && isAdmin && assortment?.code !== 'OLD_TEA') return false
+    // Дашборд — скрываем в СТМ
+    if (i.to === '/dashboard' && isAdmin && assortment?.code === 'STM') return false
+    // Прайс-лист — в OLD_TEA и СТМ (у админа); менеджеры видят всегда
+    if (i.to === '/pricelists' && isAdmin && assortment?.code !== 'OLD_TEA' && assortment?.code !== 'STM') return false
     return true
   })
   const [showChangePassword, setShowChangePassword] = useState(false)

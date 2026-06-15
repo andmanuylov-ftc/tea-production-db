@@ -75,6 +75,10 @@ export default function SKUs() {
   const [searchParams] = useSearchParams()
   const { assortment } = useAssortment()
   const [allowedProductIds, setAllowedProductIds] = useState(null) // null = без фильтра
+  const isStm = assortment?.code === 'STM'
+  const [clients, setClients] = useState([])               // [{id,name}] клиенты с SKU в СТМ
+  const [productClient, setProductClient] = useState({})   // product_id -> client_id
+  const [clientFilter, setClientFilter] = useState('')     // '' = все клиенты
   const [rows, setRows]             = useState([])
   const [types, setTypes]           = useState([])
   const [loading, setLoading]       = useState(true)
@@ -156,7 +160,31 @@ export default function SKUs() {
     return () => { cancelled = true }
   }, [assortment?.id])
 
-  // Предзаполнение поиска из URL ?q=
+  // СТМ: клиенты (папки) + карта product_id -> client_id
+  useEffect(() => {
+    if (!isStm || !assortment?.id) {
+      setClients([]); setProductClient({}); setClientFilter('')
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      const { data: ap } = await supabase
+        .from('assortment_products')
+        .select('product_id, client_id')
+        .eq('assortment_id', assortment.id)
+        .not('client_id', 'is', null)
+      const map = {}
+      const used = new Set()
+      ;(ap ?? []).forEach(row => {
+        if (row.client_id) { map[row.product_id] = row.client_id; used.add(row.client_id) }
+      })
+      const { data: cl } = await supabase.from('clients').select('id, name').order('name')
+      if (cancelled) return
+      setClients((cl ?? []).filter(c => used.has(c.id)))
+      setProductClient(map)
+    })()
+    return () => { cancelled = true }
+  }, [assortment?.id, isStm])
   useEffect(() => {
     const q = searchParams.get('q')
     if (q) setSearch(q)
@@ -441,7 +469,8 @@ export default function SKUs() {
       r.sku_article.toLowerCase().includes(search.toLowerCase()) ||
       r.product_name.toLowerCase().includes(search.toLowerCase())
     const matchType = typeFilter === 'all' || String(r.type_id) === String(typeFilter)
-    return matchSearch && matchType
+    const matchClient = !isStm || !clientFilter || productClient[r.product_id] === clientFilter
+    return matchSearch && matchType && matchClient
   })
 
   const blendItems = components.filter(c => c.recipes)
@@ -539,6 +568,21 @@ export default function SKUs() {
             ))}
           </select>
         </div>
+        {isStm && (
+          <div className="relative">
+            <Filter size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+            <select
+              value={clientFilter}
+              onChange={e => setClientFilter(e.target.value)}
+              className="bg-forest border border-forest-light/40 rounded-lg pl-9 pr-8 py-2
+                         text-cream text-sm font-body focus:outline-none focus:border-gold/50
+                         appearance-none cursor-pointer"
+            >
+              <option value="">Все клиенты</option>
+              {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+        )}
       </div>
 
       {openMenu && <div className="fixed inset-0 z-40" onClick={() => setOpenMenu(null)} />}

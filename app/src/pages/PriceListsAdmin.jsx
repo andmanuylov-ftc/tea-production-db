@@ -4,7 +4,7 @@ import ExcelJS from 'exceljs'
 import { supabase } from '../lib/supabase'
 import PageHeader from '../components/PageHeader'
 import { useAssortment } from '../contexts/AssortmentContext'
-import { Download, FileText, Search, X, FileSpreadsheet } from 'lucide-react'
+import { Download, FileText, Search, X, FileSpreadsheet, Filter } from 'lucide-react'
 
 // ============================================================================
 // Уровни клиентских цен (единый источник истины для всех выгрузок).
@@ -110,10 +110,12 @@ export default function PriceListsAdmin() {
   const isStm = assortment?.code === 'STM'
   const [productClient, setProductClient] = useState({}) // product_id -> client_id
   const [clientNames, setClientNames]     = useState({}) // client_id -> name
+  const [clientFilter, setClientFilter]   = useState('') // '' = все клиенты (только СТМ)
   const mounted = useRef(true)
 
   useEffect(() => {
     mounted.current = true
+    setClientFilter('')
     loadData()
     return () => { mounted.current = false }
   }, [assortment?.id])
@@ -188,6 +190,7 @@ export default function PriceListsAdmin() {
   }
 
   const filteredRows = rows.filter(r => {
+    if (isStm && clientFilter && (productClient[r.product_id] || '') !== clientFilter) return false
     if (!search.trim()) return true
     const q = search.toLowerCase()
     return (
@@ -568,6 +571,24 @@ export default function PriceListsAdmin() {
             </button>
           )}
         </div>
+
+        {isStm && (
+          <div className="relative">
+            <Filter size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
+            <select
+              value={clientFilter}
+              onChange={e => setClientFilter(e.target.value)}
+              className="bg-forest border border-forest-light/40 rounded-lg pl-9 pr-8 py-2
+                         text-cream text-sm font-body focus:outline-none focus:border-gold/50
+                         appearance-none cursor-pointer"
+            >
+              <option value="">Все клиенты</option>
+              {Object.entries(clientNames)
+                .sort((a, b) => a[1].localeCompare(b[1]))
+                .map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </select>
+          </div>
+        )}
 
         {selCount > 0 && (
           <div className="flex items-center gap-2">

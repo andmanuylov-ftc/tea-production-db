@@ -11,6 +11,7 @@ import {
   FileText,
   BookText,
   Users,
+  Handshake,
   KeyRound,
   LogOut,
 } from 'lucide-react'
@@ -19,16 +20,17 @@ import { useAssortment } from '../contexts/AssortmentContext'
 import ChangePasswordModal from './ChangePasswordModal'
 
 const nav = [
-  { to: '/assortments',     label: 'Ассортименты', icon: Layers,          adminOnly: true },
-  { to: '/dashboard',       label: 'Дашборд',      icon: LayoutDashboard, adminOnly: true },
-  { to: '/recipes',         label: 'Рецепты',      icon: FlaskConical,    adminOnly: true },
-  { to: '/skus',            label: 'SKU',          icon: Package,         adminOnly: true },
-  { to: '/materials',       label: 'Сырьё',        icon: Leaf,            adminOnly: true },
-  { to: '/constructor',     label: 'Конструктор',  icon: Wrench,          adminOnly: true },
-  { to: '/project',         label: 'Проект',       icon: FolderOpen,      adminOnly: true },
-  { to: '/descriptions',    label: 'Описания',     icon: BookText,        adminOnly: true },
-  { to: '/pricelists',      label: 'Прайс лист',   icon: FileText,        adminOnly: false },
-  { to: '/admin/managers',  label: 'Менеджеры',    icon: Users,           adminOnly: true },
+  { to: '/assortments',      label: 'Ассортименты',         icon: Layers,          adminOnly: true },
+  { to: '/dashboard',        label: 'Дашборд',              icon: LayoutDashboard, adminOnly: true },
+  { to: '/recipes',          label: 'Рецепты',              icon: FlaskConical,    adminOnly: true },
+  { to: '/skus',             label: 'SKU',                  icon: Package,         adminOnly: true },
+  { to: '/materials',        label: 'Сырьё',                icon: Leaf,            adminOnly: true },
+  { to: '/constructor',      label: 'Конструктор',          icon: Wrench,          adminOnly: true },
+  { to: '/project',          label: 'Проект',               icon: FolderOpen,      adminOnly: true },
+  { to: '/descriptions',     label: 'Описания',             icon: BookText,        adminOnly: true },
+  { to: '/pricelists',       label: 'Прайс лист',           icon: FileText,        adminOnly: false },
+  { to: '/admin/managers',   label: 'Менеджеры',            icon: Users,           adminOnly: true },
+  { to: '/partner-program',  label: 'Партнерская программа', icon: Handshake,       adminOnly: true },
 ]
 
 export default function Layout({ children }) {

@@ -16,6 +16,7 @@ import Project from './pages/Project'
 import PriceLists from './pages/PriceLists'
 import Descriptions from './pages/Descriptions'
 import AdminManagers from './pages/AdminManagers'
+import PartnerProgram from './pages/PartnerProgram'
 
 const adminOnly = (el) => <ProtectedRoute adminOnly>{el}</ProtectedRoute>
 
@@ -54,6 +55,7 @@ export default function App() {
                   <Route path="/project" element={adminOnly(<Project />)} />
                   <Route path="/descriptions" element={adminOnly(<Descriptions />)} />
                   <Route path="/admin/managers" element={adminOnly(<AdminManagers />)} />
+                  <Route path="/partner-program" element={adminOnly(<PartnerProgram />)} />
                 </Routes>
               </Layout>
             </ProtectedRoute>

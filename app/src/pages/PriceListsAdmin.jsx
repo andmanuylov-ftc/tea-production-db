@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
-import ExcelJS from 'exceljs'
 import { supabase } from '../lib/supabase'
+import { fetchPriceListRows, downloadClientPriceList } from '../lib/clientPriceList'
 import PageHeader from '../components/PageHeader'
 import { useAssortment } from '../contexts/AssortmentContext'
 import { Download, FileText, Search, X, FileSpreadsheet, Filter } from 'lucide-react'
@@ -10,8 +10,8 @@ import { Download, FileText, Search, X, FileSpreadsheet, Filter } from 'lucide-r
 // Уровни клиентских цен (единый источник истины для всех выгрузок).
 // markup = итоговый коэффициент к себестоимости (cost × markup).
 // НДС: экран и кнопка «Выгрузить прайс-лист» отображают цены С НДС (×1.22).
-// Кнопка «Клиентский прайс-лист» записывает в столбцы I–M цены БЕЗ НДС,
-// а столбец T «Сумма с НДС» считается формулой шаблона.
+// Кнопка «Клиентский прайс-лист» собирает книгу из view pricelist_export_v1
+// (цены там без НДС, целые) — НДС накручивается в генераторе при выборе.
 // ============================================================================
 
 const TIERS = [
@@ -27,7 +27,6 @@ function calcPrice(cost, markup) {
 }
 
 // Ставка НДС для выгрузки «Выгрузить прайс-лист» (плоский xlsx).
-// Кнопка «Клиентский прайс-лист» НДС считает формулой шаблона — этот множитель её не касается.
 const VAT_RATE = 1.22 // 22%
 
 function calcPriceWithVat(cost, markup) {
@@ -63,14 +62,6 @@ function formatWeight(size, unit) {
   return `${size} ${unit}`
 }
 
-function normalizeGrams(size, unit) {
-  if (size === null || size === undefined) return null
-  const n = Number(size)
-  if (isNaN(n)) return null
-  if (unit === 'кг') return Math.round(n * 1000)
-  return Math.round(n)
-}
-
 function fmt(val) {
   if (val == null) return '—'
   return Number(val).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -101,6 +92,7 @@ export default function PriceListsAdmin() {
   const [loading, setLoading]       = useState(true)
   const [exportingClient, setExportingClient] = useState(false)
   const [showVatModal, setShowVatModal] = useState(false)
+  const [showClientVatModal, setShowClientVatModal] = useState(false)
   const [typeNames, setTypeNames]   = useState({})
   const [search, setSearch]         = useState('')
   const [selected, setSelected]     = useState(new Set())
@@ -439,99 +431,30 @@ export default function PriceListsAdmin() {
     XLSX.writeFile(wb, `Прайс-лист ПЧК ADDIS ${fileVatLabel}${suffix} ${today.replace(/\./g, '-')}.xlsx`)
   }
 
-  // ---- Клиентский прайс (на базе template_price.xlsx, через ExcelJS) ----
-  async function exportClientPriceList() {
+  // ---- Клиентский прайс (бланк заказов) — сборка книги из pricelist_export_v1 ----
+  async function exportClientPriceList(withVat = true) {
     setExportingClient(true)
     try {
-      const res = await fetch('/template_price.xlsx')
-      if (!res.ok) {
-        throw new Error(`Шаблон недоступен (${res.status})`)
-      }
-      const buffer = await res.arrayBuffer()
-
-      // Читаем через ExcelJS — он сохраняет все стили, объединения, page setup, формулы
-      const wb = new ExcelJS.Workbook()
-      await wb.xlsx.load(buffer)
-
-      const sheet = wb.getWorksheet('Прайс-лист')
-      if (!sheet) {
-        const names = wb.worksheets.map(w => w.name).join(', ')
-        throw new Error(`В шаблоне нет листа «Прайс-лист». Найдены: ${names || '(нет)'}`)
-      }
-
       const exportRows = selCount > 0
         ? filteredRows.filter(r => selected.has(r.sku_article))
         : filteredRows
 
-      const exportGroups = groupRows(exportRows)
+      const articles = exportRows.map(r => r.sku_article)
+      const rowsForFile = await fetchPriceListRows(supabase, articles)
 
-      // Собираем плоский список SKU в порядке групп — без строк-разделителей,
-      // чтобы не ломать табличную структуру. Категория — в столбце A, клиент может
-      // фильтровать/сортировать через AutoFilter в шапке.
-      const flatSkus = []
-      for (const group of exportGroups) {
-        for (const sku of group.rows) {
-          flatSkus.push({ ...sku, categoryName: group.name })
-        }
+      if (rowsForFile.length === 0) {
+        throw new Error('Ни одна из выбранных позиций не размечена для клиентского прайса (раздел / подраздел / группа).')
+      }
+      const missing = articles.length - rowsForFile.length
+      if (missing > 0) {
+        console.warn(`Без разметки прайс-листа: ${missing} SKU — они не попадут в файл.`)
       }
 
-      const START_ROW = 11
-      const END_ROW = 810
-      const MAX_ROWS = END_ROW - START_ROW + 1
-
-      if (flatSkus.length > MAX_ROWS) {
-        console.warn(`SKU больше (${flatSkus.length}), чем места в шаблоне (${MAX_ROWS}). Лишние обрежутся.`)
-      }
-
-      // Колонки I..M соответствуют 5 уровням TIERS по порядку
-      const PRICE_COLS = ['I', 'J', 'K', 'L', 'M']
-
-      // Заполняем строки. cell.value = X не затирает стиль ячейки в ExcelJS.
-      const fillCount = Math.min(flatSkus.length, MAX_ROWS)
-      for (let i = 0; i < fillCount; i++) {
-        const sku = flatSkus[i]
-        const row = START_ROW + i
-        const grams = normalizeGrams(sku.package_size, sku.package_unit)
-        const cost = Number(sku.total_sku_cost ?? 0)
-
-        sheet.getCell(`A${row}`).value = sku.categoryName
-        sheet.getCell(`B${row}`).value = sku.sku_article ?? ''
-        sheet.getCell(`C${row}`).value = sku.product_name ?? ''
-        sheet.getCell(`D${row}`).value = descriptions[sku.sku_article] ?? ''
-        sheet.getCell(`E${row}`).value = grams ?? 0
-        sheet.getCell(`F${row}`).value = 'гр'
-        sheet.getCell(`G${row}`).value = 1
-        sheet.getCell(`H${row}`).value = 1
-        // Цены по 5 уровням TIERS (единый источник истины)
-        TIERS.forEach((t, ti) => {
-          sheet.getCell(`${PRICE_COLS[ti]}${row}`).value = calcPrice(cost, t.markup)
-        })
-        // Статус наличия: «Уточнить наличие» — если SKU отмечен галочкой на странице,
-        // иначе по умолчанию «В наличии».
-        sheet.getCell(`N${row}`).value = needsCheck.has(sku.sku_article)
-          ? 'Уточнить наличие'
-          : 'В наличии'
-        // O, P, Q — пустые для клиента; R, S, T — формулы из шаблона (сохраняются).
-      }
-
-      // Сохраняем и скачиваем через Blob (ExcelJS возвращает ArrayBuffer)
-      const outBuffer = await wb.xlsx.writeBuffer()
-      const blob = new Blob([outBuffer], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      await downloadClientPriceList(rowsForFile, {
+        withVat,
+        dateStr: new Date().toLocaleDateString('ru-RU'),
+        managerName: '',
       })
-      const url = URL.createObjectURL(blob)
-      const today = new Date().toLocaleDateString('ru-RU').replace(/\./g, '-')
-      const totalCount = exportRows.length
-      const suffix = selCount > 0 ? ` (${totalCount} поз)` : ''
-      const fileName = `Клиентский прайс-лист ПЧК${suffix} ${today}.xlsx`
-
-      const a = document.createElement('a')
-      a.href = url
-      a.download = fileName
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      setTimeout(() => URL.revokeObjectURL(url), 1000)
     } catch (err) {
       console.error('Ошибка выгрузки клиентского прайса:', err)
       alert(`Не удалось сформировать прайс: ${err.message}`)
@@ -624,13 +547,13 @@ export default function PriceListsAdmin() {
         </button>
 
         <button
-          onClick={exportClientPriceList}
-          disabled={loading || exportingClient || rows.length === 0}
+          onClick={() => setShowClientVatModal(true)}
+          disabled={loading || exportingClient || rows.length === 0 || isStm}
           className="flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-500/40
                      bg-emerald-500/10 text-emerald-300 text-xs font-body font-medium
                      hover:bg-emerald-500/20 hover:border-emerald-500/60 transition-colors whitespace-nowrap
                      disabled:opacity-40 disabled:cursor-not-allowed"
-          title="B2B прайс с 5 уровнями цен и автогенерацией бланка заказа"
+          title={isStm ? 'Клиентский прайс доступен только для основного ассортимента (OLD_TEA)' : 'B2B прайс: разделы, 5 уровней цен, автосборка бланка заказа'}
         >
           <FileSpreadsheet size={14} />
           {exportingClient
@@ -861,6 +784,62 @@ export default function PriceListsAdmin() {
                 className="px-4 py-2 text-muted hover:text-cream font-body text-xs transition-colors"
               >
                 Отмена
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Модалка выбора НДС для клиентского прайса (бланк заказов) */}
+      {showClientVatModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={() => setShowClientVatModal(false)}
+        >
+          <div
+            className="bg-forest-dark border border-forest-light/40 rounded-xl shadow-2xl p-6 w-full max-w-md mx-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-cream font-display text-lg uppercase tracking-wider">
+                Клиентский прайс-лист
+              </h2>
+              <button
+                onClick={() => setShowClientVatModal(false)}
+                className="text-muted hover:text-cream transition-colors"
+                title="Закрыть"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <p className="text-muted text-sm font-body mb-5">
+              Файл с разделами, бланком заказа и партнёрской программой. Выберите вариант цен:
+            </p>
+
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={() => { setShowClientVatModal(false); exportClientPriceList(true) }}
+                className="flex items-start gap-3 p-4 rounded-lg border border-emerald-500/40 bg-emerald-500/5
+                           hover:bg-emerald-500/15 hover:border-emerald-500/60 transition-colors text-left"
+              >
+                <FileSpreadsheet size={18} className="text-emerald-300 mt-0.5 shrink-0" />
+                <div className="flex-1">
+                  <div className="text-emerald-300 font-body font-medium text-sm">С НДС 22%</div>
+                  <div className="text-muted text-xs font-body mt-1">Стандартный клиентский вариант</div>
+                </div>
+              </button>
+
+              <button
+                onClick={() => { setShowClientVatModal(false); exportClientPriceList(false) }}
+                className="flex items-start gap-3 p-4 rounded-lg border border-forest-light/40 bg-forest-light/5
+                           hover:bg-forest-light/15 hover:border-forest-light/60 transition-colors text-left"
+              >
+                <FileSpreadsheet size={18} className="text-cream mt-0.5 shrink-0" />
+                <div className="flex-1">
+                  <div className="text-cream font-body font-medium text-sm">Без НДС</div>
+                  <div className="text-muted text-xs font-body mt-1">Цены без налога, целые рубли</div>
+                </div>
               </button>
             </div>
           </div>

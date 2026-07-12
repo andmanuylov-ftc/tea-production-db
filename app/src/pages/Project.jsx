@@ -232,13 +232,15 @@ export default function Project() {
     }
     updatePromote(p.id, 'saving', true); updatePromote(p.id, 'error', '')
 
-    const pkgSize = parseFloat(form.packageSize) || null
+    // Фасовка вводится в граммах, в БД всегда хранится в килограммах
+    const grams   = parseFloat(String(form.packageSize).replace(',', '.'))
+    const pkgSize = grams > 0 ? grams / 1000 : null
 
     const { data: prod, error: prodErr } = await supabase
       .from('products')
       .insert({
         article: form.article.trim(), name: form.name.trim(),
-        package_size: pkgSize, package_unit: 'шт',  // SKU всегда в штуках
+        package_size: pkgSize, package_unit: 'кг',  // единица хранения — всегда кг
       })
       .select('id').single()
 
@@ -436,14 +438,14 @@ export default function Project() {
                                     <label className="text-muted text-xs font-body block mb-1">Артикул</label>
                                     <input value={prom.article}
                                       onChange={e => updatePromote(p.id, 'article', e.target.value)}
-                                      placeholder={isSku ? 'Например: 4201-ЗИП100' : 'Например: 4201'}
+                                      placeholder={isSku ? 'Например: 4201-ПА100' : 'Например: 4201'}
                                       className="w-full bg-forest border border-forest-light/40 rounded-lg px-3 py-1.5 text-cream text-sm font-mono focus:outline-none focus:border-gold/50" />
                                   </div>
                                   <div>
                                     <label className="text-muted text-xs font-body block mb-1">Точное название</label>
                                     <input value={prom.name}
                                       onChange={e => updatePromote(p.id, 'name', e.target.value)}
-                                      placeholder={isSku ? 'Например: Ассам TGFOP, 100 гр' : 'Например: Ассам TGFOP'}
+                                      placeholder={isSku ? 'Например: Ассам TGFOP, 100 г.' : 'Например: Ассам TGFOP'}
                                       className="w-full bg-forest border border-forest-light/40 rounded-lg px-3 py-1.5 text-cream text-sm font-body focus:outline-none focus:border-gold/50" />
                                   </div>
 
@@ -455,19 +457,24 @@ export default function Project() {
                                     </div>
                                   )}
 
-                                  {/* SKU: фасовка в штуках */}
+                                  {/* SKU: фасовка вводится в граммах, в БД пишется в кг */}
                                   {isSku && (
                                     <div>
                                       <label className="text-muted text-xs font-body block mb-1">
-                                        Фасовка, шт
+                                        Фасовка, г
                                       </label>
                                       <div className="flex items-center gap-2">
-                                        <input type="number" value={prom.packageSize}
+                                        <input type="number" min="0" step="1" value={prom.packageSize}
                                           onChange={e => updatePromote(p.id, 'packageSize', e.target.value)}
-                                          placeholder="1"
+                                          placeholder="100"
                                           className="flex-1 bg-forest border border-forest-light/40 rounded-lg px-3 py-1.5 text-cream text-sm font-mono focus:outline-none focus:border-gold/50" />
-                                        <span className="text-muted text-sm font-mono">шт</span>
+                                        <span className="text-muted text-sm font-mono">г</span>
                                       </div>
+                                      {parseFloat(prom.packageSize) > 0 && (
+                                        <p className="text-muted/60 text-xs font-mono mt-1">
+                                          → в базе: {(parseFloat(prom.packageSize) / 1000).toFixed(3)} кг
+                                        </p>
+                                      )}
                                     </div>
                                   )}
 

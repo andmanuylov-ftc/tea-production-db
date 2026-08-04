@@ -465,3 +465,16 @@ class RawMaterialWithPrice(models.Model):
         db_table = 'raw_materials_with_price'
         verbose_name = 'Сырьё с ценой'
         verbose_name_plural = 'Сырьё с актуальной ценой'
+
+
+class RecipeClient(models.Model):
+    id = models.UUIDField(primary_key=True)
+    recipe = models.ForeignKey(Recipe, on_delete=models.DO_NOTHING, db_column='recipe_id')
+    client = models.ForeignKey(Client, on_delete=models.DO_NOTHING, db_column='client_id')
+    created_at = models.DateTimeField()
+
+    class Meta:
+        managed = False
+        db_table = 'recipe_clients'
+        verbose_name = 'Рецепт клиента (СТМ)'
+        verbose_name_plural = 'Рецепты клиентов (СТМ)'

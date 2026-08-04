@@ -1,0 +1,31 @@
+{% extends "catalog/base.html" %}
+{% block title %}{{ title }} — Рецепты{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/">Ассортименты</a> → <a href="/a/{{ code }}/{{ client_qs }}">{{ title }}</a> → Рецепты</div>
+<h1>Рецепты{% if client %} · {{ client.name }}{% endif %} <span class="muted">({{ items|length }})</span></h1>
+
+{% if clients %}
+<div class="chips">
+  <a class="chip {% if not client %}on{% endif %}" href="/a/{{ code }}/recipes/">Все клиенты</a>
+  {% for c in clients %}
+  <a class="chip {% if client and client.id == c.id %}on{% endif %}" href="/a/{{ code }}/recipes/?client={{ c.id }}">{{ c.name }}</a>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if items %}
+<div class="grid">
+  {% for r in items %}
+  <div class="rcard">
+    {% if r.photo_url %}<img src="{{ r.photo_url }}" alt="" loading="lazy">{% else %}<div class="noimg">🍃</div>{% endif %}
+    <div class="p">
+      <div class="a">{{ r.article|default:"—" }}{% if not r.is_active %} · <span class="badge">неактивен</span>{% endif %}</div>
+      <div class="n">{{ r.name }}</div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">Пока пусто</div>
+{% endif %}
+{% endblock %}

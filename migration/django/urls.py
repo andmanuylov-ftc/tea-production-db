@@ -1,9 +1,15 @@
 # -*- coding: utf-8 -*-
 from django.contrib import admin
 from django.urls import path
-from django.shortcuts import redirect
+
+from catalog import views
 
 urlpatterns = [
-    path('', lambda r: redirect('admin:index')),
+    path('', views.home, name='home'),
+    path('a/<str:code>/', views.hub, name='hub'),
+    path('a/<str:code>/recipes/', views.recipes, name='recipes'),
+    path('a/<str:code>/skus/', views.skus, name='skus'),
+    path('a/<str:code>/price/', views.price, name='price'),
+    path('a/<str:code>/price.xlsx', views.price_xlsx, name='price_xlsx'),
     path('admin/', admin.site.urls),
 ]

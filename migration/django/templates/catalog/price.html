@@ -1,0 +1,37 @@
+{% extends "catalog/base.html" %}
+{% block title %}{{ title }} — Прайс-лист{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/">Ассортименты</a> → <a href="/a/{{ code }}/{{ client_qs }}">{{ title }}</a> → Прайс-лист</div>
+<h1>Прайс-лист{% if client %} · {{ client.name }}{% endif %} <span class="muted">({{ rows|length }})</span></h1>
+
+{% if clients %}
+<div class="chips">
+  <a class="chip {% if not client %}on{% endif %}" href="/a/{{ code }}/price/">Все клиенты</a>
+  {% for c in clients %}
+  <a class="chip {% if client and client.id == c.id %}on{% endif %}" href="/a/{{ code }}/price/?client={{ c.id }}">{{ c.name }}</a>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="toolbar">
+  <a class="btn" href="/a/{{ code }}/price.xlsx{{ client_qs }}">⬇ Скачать Excel</a>
+  <span class="muted">Цены в ₽ с НДС 22%. Базовый = себестоимость с НДС × 2,4 · Партнёр = × 2,1</span>
+</div>
+
+{% if rows %}
+<table>
+  <tr><th>Артикул</th><th>Название</th><th>Фасовка</th><th class="num">Базовый, ₽</th><th class="num">Партнёр, ₽</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td>{{ r.article|default:"—" }}</td>
+    <td>{{ r.name }}</td>
+    <td>{{ r.package }}</td>
+    <td class="num price">{{ r.prices.base }}</td>
+    <td class="num price">{{ r.prices.partner }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<div class="empty">Пока пусто</div>
+{% endif %}
+{% endblock %}

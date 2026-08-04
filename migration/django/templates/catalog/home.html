@@ -1,0 +1,13 @@
+{% extends "catalog/base.html" %}
+{% block title %}Ассортименты{% endblock %}
+{% block content %}
+<h1>Выберите ассортимент</h1>
+<div class="cards">
+  {% for c in cards %}
+  <a class="card" href="/a/{{ c.code }}/">
+    <div class="t">{{ c.title }}</div>
+    <div class="d">{{ c.skus }} SKU</div>
+  </a>
+  {% endfor %}
+</div>
+{% endblock %}

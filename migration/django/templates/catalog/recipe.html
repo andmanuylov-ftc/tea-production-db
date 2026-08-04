@@ -1,0 +1,52 @@
+{% extends "catalog/base.html" %}
+{% block title %}{{ r.article|default:"" }} {{ r.name }}{% endblock %}
+{% block content %}
+<div class="crumbs">
+  <a href="/">Ассортименты</a>
+  {% if back_code %} → <a href="/a/{{ back_code }}/{{ back_qs }}">{{ back_title }}</a>
+  → <a href="/a/{{ back_code }}/recipes/{{ back_qs }}">Рецепты</a>{% endif %}
+  → {{ r.article|default:r.name }}
+</div>
+
+<div class="rhead">
+  {% if r.photo_url %}<img class="rphoto" src="{{ r.photo_url }}" alt="">{% endif %}
+  <div>
+    <h1>{{ r.article|default:"—" }} · {{ r.name }}{% if not r.is_active %} <span class="badge">неактивен</span>{% endif %}</h1>
+    <div class="costbox">
+      Себестоимость: <b>{{ cost.cost_per_kg|floatformat:2 }} ₽/кг</b>
+      <span class="muted">(на {{ r.output_quantity|floatformat:"-3" }} {{ r.output_unit }} — {{ cost.total_cost|floatformat:2 }} ₽, без НДС)</span>
+    </div>
+    {% if r.description %}<p class="muted">{{ r.description }}</p>{% endif %}
+  </div>
+</div>
+
+<h2>Состав</h2>
+<table>
+  <tr>
+    <th>Артикул</th><th>Компонент</th>
+    <th class="num">Кол-во, г</th><th class="num">Доля, %</th>
+    <th class="num">Цена, ₽/кг</th><th class="num">Стоимость, ₽</th>
+  </tr>
+  {% for i in rows %}
+  <tr>
+    <td>{{ i.article|default:"—" }}</td>
+    <td>
+      {% if i.is_sub %}<a href="/recipe/{{ i.sub_id }}/">{{ i.name }}</a> <span class="badge">под-рецепт</span>
+      {% else %}{{ i.name }}{% endif %}
+    </td>
+    <td class="num">{{ i.grams }}</td>
+    <td class="num">{{ i.share|floatformat:1 }}</td>
+    <td class="num">{% if i.price is not None %}{{ i.price|floatformat:2 }}{% else %}<span class="muted">нет цены</span>{% endif %}</td>
+    <td class="num">{% if i.line is not None %}{{ i.line|floatformat:2 }}{% else %}—{% endif %}</td>
+  </tr>
+  {% endfor %}
+  <tr class="total">
+    <td></td><td><b>Итого</b></td>
+    <td class="num"><b>{{ total_grams }}</b></td>
+    <td class="num"><b>100</b></td>
+    <td class="num"></td>
+    <td class="num"><b>{{ cost.total_cost|floatformat:2 }}</b></td>
+  </tr>
+</table>
+<p class="muted">Себестоимость считается вьюхой recipe_cost по актуальным ценам сырья; под-рецепты раскрываются рекурсивно.</p>
+{% endblock %}

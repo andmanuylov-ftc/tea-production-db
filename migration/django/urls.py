@@ -11,5 +11,6 @@ urlpatterns = [
     path('a/<str:code>/skus/', views.skus, name='skus'),
     path('a/<str:code>/price/', views.price, name='price'),
     path('a/<str:code>/price.xlsx', views.price_xlsx, name='price_xlsx'),
+    path('recipe/<uuid:pk>/', views.recipe_detail, name='recipe_detail'),
     path('admin/', admin.site.urls),
 ]

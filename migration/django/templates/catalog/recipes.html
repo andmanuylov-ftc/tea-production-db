@@ -16,13 +16,13 @@
 {% if items %}
 <div class="grid">
   {% for r in items %}
-  <div class="rcard">
+  <a class="rcard" href="/recipe/{{ r.id }}/?a={{ code }}{% if client %}&client={{ client.id }}{% endif %}">
     {% if r.photo_url %}<img src="{{ r.photo_url }}" alt="" loading="lazy">{% else %}<div class="noimg">🍃</div>{% endif %}
     <div class="p">
       <div class="a">{{ r.article|default:"—" }}{% if not r.is_active %} · <span class="badge">неактивен</span>{% endif %}</div>
       <div class="n">{{ r.name }}</div>
     </div>
-  </div>
+  </a>
   {% endfor %}
 </div>
 {% else %}

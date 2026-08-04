@@ -7,6 +7,7 @@
   Партнёр  ×2.1
 Округление до целых рублей.
 """
+import re
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.contrib.auth.decorators import login_required
@@ -15,8 +16,14 @@ from django.shortcuts import render, get_object_or_404
 
 from .models import (
     Assortment, AssortmentProduct, AssortmentRecipe,
-    Client, Recipe, RecipeClient, SkuCost,
+    Client, RawMaterialWithPrice, Recipe, RecipeClient, RecipeCost, SkuCost,
 )
+
+
+def _nat_key(s):
+    """Натуральная сортировка артикулов: 21 < 100, 4101/3 < 4101/12."""
+    return [int(t) if t.isdigit() else t.lower()
+            for t in re.split(r'(\d+)', s or '')]
 
 VAT = Decimal('1.22')
 TIERS = (
@@ -96,14 +103,11 @@ def recipes(request, code):
     if code == 'STM' and ctx['client']:
         pairs = (RecipeClient.objects.filter(client=ctx['client'])
                  .select_related('recipe'))
-        items = sorted((p.recipe for p in pairs),
-                       key=lambda r: (r.article or ''))
     else:
         pairs = (AssortmentRecipe.objects.filter(assortment=ctx['a'])
                  .select_related('recipe'))
-        items = sorted((p.recipe for p in pairs),
-                       key=lambda r: (r.article or ''))
-    ctx['items'] = items
+    ctx['items'] = sorted((p.recipe for p in pairs),
+                          key=lambda r: _nat_key(r.article))
     return render(request, 'catalog/recipes.html', ctx)
 
 
@@ -129,6 +133,7 @@ def skus(request, code):
             'type': p.type.name if p.type else '',
             'active': bool(p.is_active),
         })
+    items.sort(key=lambda i: _nat_key(i['article']))
     ctx['items'] = items
     return render(request, 'catalog/skus.html', ctx)
 
@@ -151,6 +156,7 @@ def _price_rows(ctx):
             'package': _fmt_package(p.package_size, p.package_unit),
             'prices': {key: _rub(cost_vat * k) for key, _, k in TIERS},
         })
+    rows.sort(key=lambda r: _nat_key(r['article']))
     return rows
 
 
@@ -160,6 +166,61 @@ def price(request, code):
     ctx['rows'] = _price_rows(ctx)
     ctx['tiers'] = TIERS
     return render(request, 'catalog/price.html', ctx)
+
+
+@login_required
+def recipe_detail(request, pk):
+    r = get_object_or_404(Recipe, pk=pk)
+    ings = list(r.ingredients.select_related('material', 'sub_recipe'))
+
+    mat_ids = [i.material_id for i in ings if i.material_id]
+    sub_ids = [i.sub_recipe_id for i in ings if i.sub_recipe_id]
+    prices = {m.id: m.current_price
+              for m in RawMaterialWithPrice.objects.filter(id__in=mat_ids)}
+    costs = {c.recipe_id: c
+             for c in RecipeCost.objects.filter(recipe_id__in=sub_ids + [r.id])}
+
+    rows, total_qty = [], Decimal('0')
+    for i in ings:
+        qty = i.quantity or Decimal('0')
+        total_qty += qty
+        if i.material_id:
+            price = prices.get(i.material_id)
+            rows.append({
+                'article': i.material.article, 'name': i.material.name,
+                'is_sub': False, 'sub_id': None,
+                'qty': qty, 'unit': i.unit,
+                'price': price,
+                'line': (qty * price) if price is not None else None,
+            })
+        elif i.sub_recipe_id:
+            sub_cost = costs.get(i.sub_recipe_id)
+            price = sub_cost.cost_per_kg if sub_cost else None
+            rows.append({
+                'article': i.sub_recipe.article, 'name': i.sub_recipe.name,
+                'is_sub': True, 'sub_id': i.sub_recipe_id,
+                'qty': qty, 'unit': i.unit,
+                'price': price,
+                'line': (qty * price) if price is not None else None,
+            })
+    for row in rows:
+        row['grams'] = int(row['qty'] * 1000)
+        row['share'] = (row['qty'] / total_qty * 100) if total_qty else None
+    rows.sort(key=lambda x: x['qty'], reverse=True)
+
+    my_cost = costs.get(r.id)
+    back_code = request.GET.get('a') if request.GET.get('a') in TITLES else None
+    back_client = request.GET.get('client', '')
+    return render(request, 'catalog/recipe.html', {
+        'r': r,
+        'rows': rows,
+        'total_qty': total_qty,
+        'total_grams': int(total_qty * 1000),
+        'cost': my_cost,
+        'back_code': back_code,
+        'back_title': TITLES.get(back_code, ''),
+        'back_qs': f'?client={back_client}' if back_client else '',
+    })
 
 
 @login_required

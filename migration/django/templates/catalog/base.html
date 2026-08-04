@@ -57,7 +57,17 @@
   .btn:hover { filter: brightness(1.15); }
   .toolbar { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; flex-wrap: wrap; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
-  .rcard { background: #fff; border: 1px solid #dcdacd; border-radius: 12px; overflow: hidden; }
+  .rcard { background: #fff; border: 1px solid #dcdacd; border-radius: 12px; overflow: hidden;
+           display: block; text-decoration: none; color: inherit;
+           transition: transform .08s, box-shadow .08s; }
+  a.rcard:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(73,78,49,.14); }
+  .rhead { display: flex; gap: 22px; align-items: flex-start; margin-bottom: 8px; }
+  .rphoto { width: 180px; border-radius: 12px; border: 1px solid #dcdacd; }
+  .costbox { background: #fff; border: 1px solid #dcdacd; border-radius: 10px;
+             padding: 10px 16px; display: inline-block; font-size: 16px; }
+  .costbox b { color: var(--wine); font-size: 18px; }
+  h2 { color: var(--dark); font-size: 20px; margin: 22px 0 12px; }
+  tr.total td { border-top: 2px solid var(--dark); background: #f3f2e8; }
   .rcard img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: #f1f0e7; }
   .rcard .noimg { width: 100%; aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
                   background: #f1f0e7; color: #b9b7a5; font-size: 34px; }

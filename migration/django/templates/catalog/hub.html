@@ -1,28 +1,28 @@
 {% extends "catalog/base.html" %}
 {% block title %}{{ title }}{% endblock %}
 {% block content %}
-<div class="crumbs"><a href="/">Ассортименты</a> → {{ title }}</div>
+<div class="crumbs"><a href="/dj/">Ассортименты</a> → {{ title }}</div>
 <h1>{{ title }}{% if client %} · {{ client.name }}{% endif %}</h1>
 
 {% if clients %}
 <div class="chips">
-  <a class="chip {% if not client %}on{% endif %}" href="/a/{{ code }}/">Все клиенты</a>
+  <a class="chip {% if not client %}on{% endif %}" href="/dj/a/{{ code }}/">Все клиенты</a>
   {% for c in clients %}
-  <a class="chip {% if client and client.id == c.id %}on{% endif %}" href="/a/{{ code }}/?client={{ c.id }}">{{ c.name }}</a>
+  <a class="chip {% if client and client.id == c.id %}on{% endif %}" href="/dj/a/{{ code }}/?client={{ c.id }}">{{ c.name }}</a>
   {% endfor %}
 </div>
 {% endif %}
 
 <div class="cards">
-  <a class="card" href="/a/{{ code }}/recipes/{{ client_qs }}">
+  <a class="card" href="/dj/a/{{ code }}/recipes/{{ client_qs }}">
     <div class="t">Рецепты</div>
     <div class="d">купажи{% if client %} клиента{% endif %}</div>
   </a>
-  <a class="card" href="/a/{{ code }}/skus/{{ client_qs }}">
+  <a class="card" href="/dj/a/{{ code }}/skus/{{ client_qs }}">
     <div class="t">SKU</div>
     <div class="d">товарные позиции</div>
   </a>
-  <a class="card" href="/a/{{ code }}/price/{{ client_qs }}">
+  <a class="card" href="/dj/a/{{ code }}/price/{{ client_qs }}">
     <div class="t">Прайс-лист</div>
     <div class="d">Базовый ×2,4 · Партнёр ×2,1 (с НДС)</div>
   </a>

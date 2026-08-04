@@ -2,9 +2,9 @@
 {% block title %}{{ r.article|default:"" }} {{ r.name }}{% endblock %}
 {% block content %}
 <div class="crumbs">
-  <a href="/">Ассортименты</a>
-  {% if back_code %} → <a href="/a/{{ back_code }}/{{ back_qs }}">{{ back_title }}</a>
-  → <a href="/a/{{ back_code }}/recipes/{{ back_qs }}">Рецепты</a>{% endif %}
+  <a href="/dj/">Ассортименты</a>
+  {% if back_code %} → <a href="/dj/a/{{ back_code }}/{{ back_qs }}">{{ back_title }}</a>
+  → <a href="/dj/a/{{ back_code }}/recipes/{{ back_qs }}">Рецепты</a>{% endif %}
   → {{ r.article|default:r.name }}
 </div>
 
@@ -31,7 +31,7 @@
   <tr>
     <td>{{ i.article|default:"—" }}</td>
     <td>
-      {% if i.is_sub %}<a href="/recipe/{{ i.sub_id }}/">{{ i.name }}</a> <span class="badge">под-рецепт</span>
+      {% if i.is_sub %}<a href="/dj/recipe/{{ i.sub_id }}/">{{ i.name }}</a> <span class="badge">под-рецепт</span>
       {% else %}{{ i.name }}{% endif %}
     </td>
     <td class="num">{{ i.grams }}</td>

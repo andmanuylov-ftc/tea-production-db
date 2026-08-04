@@ -1,14 +1,14 @@
 {% extends "catalog/base.html" %}
 {% block title %}{{ title }} — SKU{% endblock %}
 {% block content %}
-<div class="crumbs"><a href="/">Ассортименты</a> → <a href="/a/{{ code }}/{{ client_qs }}">{{ title }}</a> → SKU</div>
+<div class="crumbs"><a href="/dj/">Ассортименты</a> → <a href="/dj/a/{{ code }}/{{ client_qs }}">{{ title }}</a> → SKU</div>
 <h1>SKU{% if client %} · {{ client.name }}{% endif %} <span class="muted">({{ items|length }})</span></h1>
 
 {% if clients %}
 <div class="chips">
-  <a class="chip {% if not client %}on{% endif %}" href="/a/{{ code }}/skus/">Все клиенты</a>
+  <a class="chip {% if not client %}on{% endif %}" href="/dj/a/{{ code }}/skus/">Все клиенты</a>
   {% for c in clients %}
-  <a class="chip {% if client and client.id == c.id %}on{% endif %}" href="/a/{{ code }}/skus/?client={{ c.id }}">{{ c.name }}</a>
+  <a class="chip {% if client and client.id == c.id %}on{% endif %}" href="/dj/a/{{ code }}/skus/?client={{ c.id }}">{{ c.name }}</a>
   {% endfor %}
 </div>
 {% endif %}

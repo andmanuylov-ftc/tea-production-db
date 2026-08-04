@@ -80,10 +80,10 @@
 </head>
 <body>
 <header>
-  <a href="/" class="logo">ПЧК · TEA BASE</a>
+  <a href="/dj/" class="logo">ПЧК · TEA BASE</a>
   <span class="sub">внутренний каталог</span>
   <span class="right">
-    {% if user.is_authenticated %}{{ user.username }} · <a href="/admin/">админка</a> · <a href="/admin/logout/">выйти</a>{% endif %}
+    {% if user.is_authenticated %}{{ user.username }} · <a href="/dj/admin/">админка</a> · <a href="/dj/admin/logout/">выйти</a>{% endif %}
   </span>
 </header>
 <main>

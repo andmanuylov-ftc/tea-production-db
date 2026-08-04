@@ -33,6 +33,7 @@ TABLES=(
   assortment_products assortment_recipes assortment_price_lists assortment_materials
   projects project_items
   managers pricelist_downloads
+  pricelist_sections pricelist_subsections product_pricelist_position recipe_clients
 )
 
 DUMP="$(mktemp /tmp/tea_data_XXXX.sql)"

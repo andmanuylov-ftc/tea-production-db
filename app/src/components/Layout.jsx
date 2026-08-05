@@ -14,6 +14,7 @@ import {
   Handshake,
   KeyRound,
   LogOut,
+  Home,
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { useAssortment } from '../contexts/AssortmentContext'
@@ -62,6 +63,14 @@ export default function Layout({ children }) {
             </div>
           </div>
         </div>
+
+        <a
+          href="/"
+          className="mx-3 mt-3 flex items-center gap-2 px-3 py-2 rounded-lg text-muted text-sm font-body hover:text-cream hover:bg-forest-light/50 transition-all"
+        >
+          <Home size={15} />
+          На главную
+        </a>
 
         {isAdmin && assortment && (
           <button

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ПЧК — рабочее пространство</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    min-height: 100vh; display: flex; flex-direction: column;
+    background: #ECEBE3; color: #2C2C26;
+    font-family: 'Mulish', -apple-system, 'Segoe UI', Roboto, sans-serif;
+  }
+  header {
+    background: #494E31; color: #ECEBE3; padding: 18px 28px;
+    display: flex; align-items: baseline; gap: 14px;
+  }
+  header .logo { font-weight: 800; font-size: 22px; letter-spacing: .5px; }
+  header .sub { opacity: .7; font-size: 14px; }
+  main {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    padding: 40px 20px;
+  }
+  .wrap { width: 100%; max-width: 760px; text-align: center; }
+  h1 { color: #494E31; font-size: 28px; margin-bottom: 34px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 22px; }
+  .card {
+    display: block; background: #fff; border: 1px solid #dcdacd; border-radius: 18px;
+    padding: 44px 30px; text-decoration: none; color: #2C2C26;
+    transition: transform .1s, box-shadow .1s;
+  }
+  .card:hover { transform: translateY(-3px); box-shadow: 0 10px 26px rgba(73,78,49,.16); }
+  .card .icon { font-size: 44px; }
+  .card .t { margin-top: 14px; font-size: 22px; font-weight: 800; color: #494E31; }
+  .card .d { margin-top: 8px; font-size: 14.5px; color: #6C7159; line-height: 1.45; }
+  footer { text-align: center; padding: 18px; font-size: 13px; color: #9a9a8a; }
+</style>
+</head>
+<body>
+<header>
+  <span class="logo">ПЧК</span>
+  <span class="sub">Первая чайная компания · рабочее пространство</span>
+</header>
+<main>
+  <div class="wrap">
+    <h1>Куда идём?</h1>
+    <div class="cards">
+      <a class="card" href="/assortments">
+        <div class="icon">🍃</div>
+        <div class="t">Ассортимент</div>
+        <div class="d">База сырья, рецептов и SKU:<br>себестоимость, прайс-листы, каталог</div>
+      </a>
+      <a class="card" href="https://report.tea01.ru">
+        <div class="icon">📊</div>
+        <div class="t">Ozon</div>
+        <div class="d">Аналитика продаж Ozon:<br>выручка, юнит-экономика, склады, поставки</div>
+      </a>
+    </div>
+  </div>
+</main>
+<footer>tea01.ru — внутренняя система ПЧК</footer>
+</body>
+</html>

@@ -1,4 +1,7 @@
 <!DOCTYPE html>
+<!-- Главная tea01.ru (/var/www/tea01/landing.html). Актуальная версия ведётся в
+     репозитории Sales (deploy/tea01_landing.html) и ставится автодеплоем CRM;
+     здесь — синхронизированная копия. -->
 <html lang="ru">
 <head>
 <meta charset="utf-8">
@@ -21,7 +24,7 @@
     flex: 1; display: flex; align-items: center; justify-content: center;
     padding: 40px 20px;
   }
-  .wrap { width: 100%; max-width: 760px; text-align: center; }
+  .wrap { width: 100%; max-width: 1080px; text-align: center; }
   h1 { color: #494E31; font-size: 28px; margin-bottom: 34px; }
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 22px; }
   .card {
@@ -37,6 +40,11 @@
     font-size: 46px; font-weight: 900; color: #005BFF; letter-spacing: -1px;
     line-height: 1.35; font-family: -apple-system, 'Segoe UI', Roboto, sans-serif;
   }
+  /* CRM — фирменные цвета системы (тёмно-зелёный + золото) */
+  .card.crm { background: #494E31; border-color: #494E31; }
+  .card.crm .t { color: #D9B36C; }
+  .card.crm .d { color: #ECEBE3; opacity: .8; }
+  .card.crm:hover { box-shadow: 0 10px 26px rgba(73,78,49,.35); }
   footer { text-align: center; padding: 18px; font-size: 13px; color: #9a9a8a; }
 </style>
 </head>
@@ -57,6 +65,11 @@
       <a class="card" href="https://ozon.tea01.ru">
         <div class="ozon-logo">ozon</div>
         <div class="d">Аналитика продаж:<br>выручка, юнит-экономика, склады, поставки</div>
+      </a>
+      <a class="card crm" href="https://crm.tea01.ru">
+        <div class="icon">☕</div>
+        <div class="t">CRM · Контроль продаж</div>
+        <div class="d">Воронка продаж HoReCa и опта:<br>клиенты, сделки, заказы, отчёты</div>
       </a>
     </div>
   </div>
